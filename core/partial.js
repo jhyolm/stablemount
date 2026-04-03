@@ -62,6 +62,9 @@ export function resolvePartials(html, currentSlug = '') {
       } catch (_) { /* invalid slot JSON */ }
     }
 
+    if (!markup.includes('data-partial='))
+      markup = markup.replace(/^(\s*<\w+)/, `$1 data-partial="${name}"`);
+
     return `<!-- @partial:${name}:begin -->\n${markup}\n<!-- @partial:${name}:end -->`;
   }
 

@@ -661,9 +661,9 @@
     else if (sitePanelTab === 'media') loadMediaTab();
   }
 
-  // ── Shared UI access ──
+  // ── Shared UI access (lazy - module may still be loading at parse time) ──
 
-  const UI = window.__SM_UI__ || {};
+  function UI() { return window.__SM_UI__ || {}; }
 
   function debounce(fn, ms) {
     let timer;
@@ -703,7 +703,7 @@
     for (const [kind, items] of Object.entries(grouped)) {
       html += `<div class="sm-decision-group"><div class="sm-decision-group-label">${esc(kind)}</div>`;
       for (const d of items) {
-        html += (UI.renderDecisionRow || renderDecisionRowFallback)(d);
+        html += (UI().renderDecisionRow || renderDecisionRowFallback)(d);
       }
       html += '</div>';
     }
@@ -832,6 +832,13 @@
     document.querySelectorAll('[data-partial]').forEach(el => {
       if (!el.closest('[data-sm-overlay]')) slugs.add(el.getAttribute('data-partial'));
     });
+    if (!slugs.size) {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+      while (walker.nextNode()) {
+        const m = walker.currentNode.nodeValue.match(/@partial:([\w][\w-]*):begin/);
+        if (m) slugs.add(m[1]);
+      }
+    }
     return slugs;
   }
 
@@ -855,17 +862,17 @@
       return;
     }
 
-    const siteCSS = await (UI.fetchSiteCSS || (async () => ''))();
+    const siteCSS = await (UI().fetchSiteCSS || (async () => ''))();
 
     let html = '<div class="sm-component-grid">';
     for (const p of partials) {
       const isUsed = usedOnPage.has(p.slug);
-      html += (UI.renderComponentCard || renderComponentCardFallback)(p, { isUsed, showFind: true });
+      html += (UI().renderComponentCard || renderComponentCardFallback)(p, { isUsed, showFind: true });
     }
     html += '</div>';
     siteBody.innerHTML = html;
 
-    const mountPreview = UI.mountComponentPreview || null;
+    const mountPreview = UI().mountComponentPreview || null;
     for (const p of partials) {
       const previewEl = siteBody.querySelector(`[data-comp-preview="${p.slug}"]`);
       if (!previewEl) continue;
@@ -879,7 +886,16 @@
 
       const findBtn = card.querySelector('.sm-comp-find');
       if (findBtn) findBtn.addEventListener('click', () => {
-        const el = document.querySelector(`[data-partial="${compSlug}"]`);
+        let el = document.querySelector(`[data-partial="${compSlug}"]`);
+        if (!el) {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+          while (walker.nextNode()) {
+            if (walker.currentNode.nodeValue.includes(`@partial:${compSlug}:begin`)) {
+              el = walker.currentNode.nextElementSibling;
+              break;
+            }
+          }
+        }
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           el.style.outline = '2px solid #0891b2';
@@ -907,7 +923,7 @@
   }
 
   function renderComponentCardFallback(p, opts) {
-    return (UI.renderComponentCard || function(partial, o) {
+    return (UI().renderComponentCard || function(partial, o) {
       const { isUsed = false, showFind = false } = o || {};
       return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-slug="${esc(partial.slug)}" data-comp-id="${esc(partial.id)}">
         <div class="sm-comp-card-header">
@@ -980,7 +996,7 @@
     } else {
       html += '<div class="sm-media-grid">';
       for (const item of media) {
-        html += (UI.renderMediaCard || renderMediaCardFallback)(item);
+        html += (UI().renderMediaCard || renderMediaCardFallback)(item);
       }
       html += '</div>';
     }
