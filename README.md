@@ -9,7 +9,7 @@ Everything the AI decides is captured as an editable **decision** (design tokens
 ## Getting started
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/stablemount.git
+git clone https://github.com/jhyolm/stablemount.git
 cd stablemount
 npm install
 ```

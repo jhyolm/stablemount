@@ -252,7 +252,7 @@ const server = createServer(async (req, res) => {
 
     // ── API: Media ──
     if (path === '/api/media' && method === 'GET') return send(res, 200, listMedia());
-    m = path.match(/^\/api\/media\/([^/]+)$/);
+    let m = path.match(/^\/api\/media\/([^/]+)$/);
     if (m && method === 'DELETE') { deleteMedia(m[1]); return send(res, 204, ''); }
 
     if (path === '/api/media/upload' && method === 'POST') {
@@ -299,7 +299,7 @@ const server = createServer(async (req, res) => {
     // ── API: Decisions ──
     if (path === '/api/decisions' && method === 'GET') return send(res, 200, listDecisions());
     if (path === '/api/decisions' && method === 'POST') return send(res, 201, createDecision(await jsonBody(req)));
-    let m = path.match(/^\/api\/decisions\/([^/]+)$/);
+    m = path.match(/^\/api\/decisions\/([^/]+)$/);
     if (m && method === 'PUT') {
       const r = updateDecision(m[1], await jsonBody(req));
       return r ? send(res, 200, r) : send(res, 404, { error: 'Not found' });
