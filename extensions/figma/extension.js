@@ -234,14 +234,15 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
 // ─── Figma URL Parsing ──────────────────────────────────────
 
 function parseFigmaUrl(url) {
-  // Handles: figma.com/design/KEY/..., figma.com/file/KEY/...
   const fileMatch = url.match(/figma\.com\/(?:design|file)\/([a-zA-Z0-9]+)/);
   const fileKey = fileMatch ? fileMatch[1] : null;
 
-  // node-id can be in query param or URL path
   let nodeId = null;
   const nodeMatch = url.match(/node-id=([^&]+)/);
-  if (nodeMatch) nodeId = decodeURIComponent(nodeMatch[1]);
+  if (nodeMatch) {
+    // Figma URLs use hyphens (1-2) but the API uses colons (1:2)
+    nodeId = decodeURIComponent(nodeMatch[1]).replace(/-/g, ':');
+  }
 
   return { fileKey, nodeId };
 }

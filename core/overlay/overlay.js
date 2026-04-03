@@ -76,6 +76,8 @@
       <span id="sm-status"></span>
       <button class="sm-btn sm-btn-save" id="sm-save" disabled>Save</button>
       <button class="sm-btn sm-btn-ai" id="sm-ai-toggle">AI</button>
+      <button class="sm-btn sm-btn-images" id="sm-images-toggle">IMG</button>
+      <button class="sm-btn sm-btn-site" id="sm-site-toggle">SITE</button>
     </div>`;
   document.body.prepend(topbar);
   document.body.classList.add('sm-body-offset');
@@ -484,6 +486,536 @@
   document.getElementById('sm-ai-toggle').addEventListener('click', toggleChat);
   document.getElementById('sm-chat-close').addEventListener('click', toggleChat);
 
+  // ── Image Panel ──
+
+  let imagePanelOpen = false;
+  const imagePanel = document.createElement('div');
+  imagePanel.className = 'sm-image-panel';
+  imagePanel.setAttribute('data-sm-overlay', '');
+  imagePanel.innerHTML = `
+    <div class="sm-image-panel-header">
+      <span>Page Images</span>
+      <button class="sm-image-panel-close" id="sm-images-close">&times;</button>
+    </div>
+    <div class="sm-image-panel-list" id="sm-image-list"></div>`;
+  document.body.appendChild(imagePanel);
+
+  const imageListEl = document.getElementById('sm-image-list');
+
+  const imageHighlight = document.createElement('div');
+  imageHighlight.className = 'sm-image-highlight';
+  imageHighlight.setAttribute('data-sm-overlay', '');
+  document.body.appendChild(imageHighlight);
+
+  function toggleImagePanel() {
+    imagePanelOpen = !imagePanelOpen;
+    imagePanel.classList.toggle('open', imagePanelOpen);
+    document.getElementById('sm-images-toggle').classList.toggle('active', imagePanelOpen);
+    if (imagePanelOpen) scanPageImages();
+  }
+
+  document.getElementById('sm-images-toggle').addEventListener('click', toggleImagePanel);
+  document.getElementById('sm-images-close').addEventListener('click', toggleImagePanel);
+
+  function scanPageImages() {
+    const items = [];
+
+    document.querySelectorAll('img').forEach(img => {
+      if (img.closest('[data-sm-overlay]')) return;
+      const src = img.getAttribute('src') || '';
+      if (!src) return;
+      items.push({ type: 'img', src, element: img, label: img.alt || img.closest('[data-section]')?.dataset.section || 'image' });
+    });
+
+    document.querySelectorAll('[data-section], [data-partial], section, header, footer, [class*="hero"], [class*="banner"]').forEach(el => {
+      if (el.closest('[data-sm-overlay]')) return;
+      const bg = getComputedStyle(el).backgroundImage;
+      if (!bg || bg === 'none' || !bg.includes('url(')) return;
+      const urlMatch = bg.match(/url\(["']?([^"')]+)["']?\)/);
+      const src = urlMatch ? urlMatch[1] : bg;
+      items.push({ type: 'bg', src, element: el, label: el.dataset.section || el.dataset.partial || el.tagName.toLowerCase() + ' background' });
+    });
+
+    imageListEl.innerHTML = '';
+
+    if (!items.length) {
+      imageListEl.innerHTML = '<div class="sm-image-empty">No images found on this page.</div>';
+      return;
+    }
+
+    for (const item of items) {
+      const row = document.createElement('div');
+      row.className = 'sm-image-row';
+
+      const thumb = document.createElement('div');
+      thumb.className = 'sm-image-thumb';
+      if (item.type === 'bg') {
+        thumb.style.backgroundImage = `url('${item.src}')`;
+      } else {
+        const tImg = document.createElement('img');
+        tImg.src = item.src;
+        thumb.appendChild(tImg);
+      }
+
+      const info = document.createElement('div');
+      info.className = 'sm-image-info';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'sm-image-name';
+      nameEl.textContent = item.label;
+
+      const srcEl = document.createElement('div');
+      srcEl.className = 'sm-image-src';
+      const shortSrc = item.src.length > 40 ? '…' + item.src.slice(-38) : item.src;
+      srcEl.textContent = (item.type === 'bg' ? 'BG: ' : '') + shortSrc;
+
+      const replaceBtn = document.createElement('button');
+      replaceBtn.className = 'sm-btn sm-image-replace';
+      replaceBtn.textContent = 'Replace';
+
+      replaceBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        uploadAndReplace(path => {
+          if (item.type === 'img') {
+            item.element.src = path;
+          } else {
+            item.element.style.backgroundImage = `url('${path}')`;
+          }
+          item.src = path;
+          srcEl.textContent = (item.type === 'bg' ? 'BG: ' : '') + path;
+          if (thumb.querySelector('img')) thumb.querySelector('img').src = path;
+          else thumb.style.backgroundImage = `url('${path}')`;
+        });
+      });
+
+      row.addEventListener('mouseenter', () => {
+        const rect = item.element.getBoundingClientRect();
+        imageHighlight.style.display = 'block';
+        imageHighlight.style.top = rect.top + 'px';
+        imageHighlight.style.left = rect.left + 'px';
+        imageHighlight.style.width = rect.width + 'px';
+        imageHighlight.style.height = rect.height + 'px';
+        item.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+      row.addEventListener('mouseleave', () => {
+        imageHighlight.style.display = 'none';
+      });
+
+      info.appendChild(nameEl);
+      info.appendChild(srcEl);
+      row.appendChild(thumb);
+      row.appendChild(info);
+      row.appendChild(replaceBtn);
+      imageListEl.appendChild(row);
+    }
+  }
+
+  // ── Site Panel (Decisions / Collections / Media) ──
+
+  let sitePanelOpen = false;
+  let sitePanelTab = 'decisions';
+  const sitePanel = document.createElement('div');
+  sitePanel.className = 'sm-site-panel';
+  sitePanel.setAttribute('data-sm-overlay', '');
+  sitePanel.innerHTML = `
+    <div class="sm-site-panel-header">
+      <div class="sm-site-tabs">
+        <button class="sm-site-tab active" data-site-tab="decisions">Decisions</button>
+        <button class="sm-site-tab" data-site-tab="collections">Collections</button>
+        <button class="sm-site-tab" data-site-tab="media">Media</button>
+      </div>
+      <button class="sm-site-panel-close" id="sm-site-close">&times;</button>
+    </div>
+    <div class="sm-site-panel-body" id="sm-site-body"></div>`;
+  document.body.appendChild(sitePanel);
+
+  const siteBody = document.getElementById('sm-site-body');
+
+  sitePanel.querySelectorAll('.sm-site-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      sitePanel.querySelectorAll('.sm-site-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      sitePanelTab = tab.dataset.siteTab;
+      loadSiteTab();
+    });
+  });
+
+  function toggleSitePanel() {
+    sitePanelOpen = !sitePanelOpen;
+    sitePanel.classList.toggle('open', sitePanelOpen);
+    document.getElementById('sm-site-toggle').classList.toggle('active', sitePanelOpen);
+    if (sitePanelOpen) loadSiteTab();
+  }
+
+  document.getElementById('sm-site-toggle').addEventListener('click', toggleSitePanel);
+  document.getElementById('sm-site-close').addEventListener('click', toggleSitePanel);
+
+  function loadSiteTab() {
+    if (sitePanelTab === 'decisions') loadDecisionsTab();
+    else if (sitePanelTab === 'collections') loadCollectionsTab();
+    else if (sitePanelTab === 'media') loadMediaTab();
+  }
+
+  // ── Decisions Tab ──
+
+  async function loadDecisionsTab() {
+    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
+    try {
+      const res = await fetch('/api/decisions');
+      if (!res.ok) throw new Error('Failed to load');
+      const decisions = await res.json();
+      renderDecisions(decisions);
+    } catch (err) {
+      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
+    }
+  }
+
+  function renderDecisions(decisions) {
+    if (!decisions.length) {
+      siteBody.innerHTML = `
+        <div class="sm-site-empty">No decisions yet.</div>
+        <div class="sm-site-actions"><button class="sm-btn sm-site-add-btn" id="sm-add-decision">+ Add Decision</button></div>`;
+      document.getElementById('sm-add-decision').addEventListener('click', showAddDecision);
+      return;
+    }
+
+    const grouped = {};
+    for (const d of decisions) {
+      const k = d.kind || 'other';
+      (grouped[k] = grouped[k] || []).push(d);
+    }
+
+    let html = '<div class="sm-site-actions"><button class="sm-btn sm-site-add-btn" id="sm-add-decision">+ Add</button></div>';
+    for (const [kind, items] of Object.entries(grouped)) {
+      html += `<div class="sm-decision-group"><div class="sm-decision-group-label">${esc(kind)}</div>`;
+      for (const d of items) {
+        const isColor = d.kind === 'token' && /^color-|^#|^rgb|^hsl/.test(d.content);
+        html += `<div class="sm-decision-row" data-decision-id="${d.id}">
+          <div class="sm-decision-main">
+            ${isColor ? `<span class="sm-decision-swatch" style="background:${esc(d.content)}"></span>` : ''}
+            <span class="sm-decision-name">${esc(d.name)}</span>
+            <span class="sm-decision-weight">${esc(d.weight)}</span>
+          </div>
+          <input class="sm-decision-input" value="${esc(d.content)}" data-field="content">
+          <div class="sm-decision-meta">
+            <select class="sm-decision-select" data-field="weight">
+              <option value="rule"${d.weight === 'rule' ? ' selected' : ''}>rule</option>
+              <option value="guide"${d.weight === 'guide' ? ' selected' : ''}>guide</option>
+              <option value="absolute"${d.weight === 'absolute' ? ' selected' : ''}>absolute</option>
+            </select>
+            <select class="sm-decision-select" data-field="scope">
+              <option value="global"${d.scope === 'global' ? ' selected' : ''}>global</option>
+              ${slug ? `<option value="${slug}"${d.scope === slug ? ' selected' : ''}>${slug}</option>` : ''}
+            </select>
+            <button class="sm-decision-delete" title="Delete">&times;</button>
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+    }
+    siteBody.innerHTML = html;
+
+    document.getElementById('sm-add-decision').addEventListener('click', showAddDecision);
+
+    siteBody.querySelectorAll('.sm-decision-row').forEach(row => {
+      const id = row.dataset.decisionId;
+
+      row.querySelector('.sm-decision-input').addEventListener('change', async (e) => {
+        const val = e.target.value;
+        await saveDecision(id, { content: val });
+        const swatch = row.querySelector('.sm-decision-swatch');
+        if (swatch) swatch.style.background = val;
+        applyDecisionLive(row.querySelector('.sm-decision-name').textContent, val);
+      });
+
+      row.querySelectorAll('.sm-decision-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+          saveDecision(id, { [sel.dataset.field]: sel.value });
+        });
+      });
+
+      row.querySelector('.sm-decision-delete').addEventListener('click', async () => {
+        await fetch(`/api/decisions/${id}`, { method: 'DELETE' });
+        row.remove();
+        toast('Decision deleted');
+      });
+    });
+  }
+
+  async function saveDecision(id, updates) {
+    try {
+      await fetch(`/api/decisions/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      toast('Decision saved');
+    } catch {
+      toast('Save failed');
+    }
+  }
+
+  function applyDecisionLive(name, value) {
+    if (!name.startsWith('color-') && !name.startsWith('font-')) return;
+    const prop = '--sm-' + name;
+    document.documentElement.style.setProperty(prop, value);
+
+    if (name.startsWith('color-')) {
+      document.querySelectorAll('style:not([data-sm-overlay])').forEach(s => {
+        if (s.textContent.includes(prop)) return;
+      });
+    }
+  }
+
+  function showAddDecision() {
+    const modal = document.createElement('div');
+    modal.className = 'sm-site-modal';
+    modal.setAttribute('data-sm-overlay', '');
+    modal.innerHTML = `
+      <div class="sm-site-modal-box">
+        <h3>New Decision</h3>
+        <label>Name<input type="text" id="sm-new-dec-name" placeholder="e.g. color-primary"></label>
+        <label>Kind<select id="sm-new-dec-kind">
+          <option value="token">token</option>
+          <option value="rule">rule</option>
+          <option value="constraint">constraint</option>
+        </select></label>
+        <label>Content<input type="text" id="sm-new-dec-content" placeholder="e.g. #3b82f6"></label>
+        <label>Weight<select id="sm-new-dec-weight">
+          <option value="guide">guide</option>
+          <option value="rule">rule</option>
+          <option value="absolute">absolute</option>
+        </select></label>
+        <div class="sm-site-modal-actions">
+          <button class="sm-btn" id="sm-new-dec-save">Create</button>
+          <button class="sm-btn sm-btn-cancel" id="sm-new-dec-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#sm-new-dec-name').focus();
+
+    modal.querySelector('#sm-new-dec-cancel').addEventListener('click', () => modal.remove());
+    modal.querySelector('#sm-new-dec-save').addEventListener('click', async () => {
+      const name = modal.querySelector('#sm-new-dec-name').value.trim();
+      const kind = modal.querySelector('#sm-new-dec-kind').value;
+      const content = modal.querySelector('#sm-new-dec-content').value.trim();
+      const weight = modal.querySelector('#sm-new-dec-weight').value;
+      if (!name) { toast('Name required'); return; }
+      try {
+        await fetch('/api/decisions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, kind, content, weight, scope: 'global' }),
+        });
+        modal.remove();
+        loadDecisionsTab();
+        toast('Decision created');
+      } catch { toast('Failed to create'); }
+    });
+  }
+
+  // ── Collections Tab ──
+
+  let collectionsCache = [];
+
+  async function loadCollectionsTab() {
+    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
+    try {
+      const res = await fetch('/api/collections');
+      if (!res.ok) throw new Error('Failed to load');
+      collectionsCache = await res.json();
+      renderCollectionsList();
+    } catch (err) {
+      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
+    }
+  }
+
+  function renderCollectionsList() {
+    if (!collectionsCache.length) {
+      siteBody.innerHTML = '<div class="sm-site-empty">No collections yet. Create one from the dashboard or via AI chat.</div>';
+      return;
+    }
+
+    let html = '';
+    for (const col of collectionsCache) {
+      const fields = (col.schema || []).map(f => f.name).join(', ');
+      html += `<div class="sm-collection-item" data-col-slug="${esc(col.slug)}">
+        <div class="sm-collection-item-header">
+          <strong>${esc(col.name)}</strong>
+          <span class="sm-collection-item-slug">/${esc(col.slug)}</span>
+          <span class="sm-collection-item-chevron">&#9654;</span>
+        </div>
+        <div class="sm-collection-item-fields">${esc(fields) || 'no schema'}</div>
+      </div>`;
+    }
+    siteBody.innerHTML = html;
+
+    siteBody.querySelectorAll('.sm-collection-item').forEach(item => {
+      item.addEventListener('click', () => {
+        loadCollectionEntries(item.dataset.colSlug);
+      });
+    });
+  }
+
+  async function loadCollectionEntries(colSlug) {
+    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
+    const col = collectionsCache.find(c => c.slug === colSlug);
+    if (!col) return;
+
+    try {
+      const res = await fetch(`/api/collections/${colSlug}/entries`);
+      if (!res.ok) throw new Error('Failed to load');
+      const entries = await res.json();
+      renderCollectionEntries(col, entries);
+    } catch (err) {
+      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
+    }
+  }
+
+  function renderCollectionEntries(col, entries) {
+    let html = `<div class="sm-collection-back" id="sm-col-back">&larr; All Collections</div>`;
+    html += `<div class="sm-collection-detail-header"><strong>${esc(col.name)}</strong> <span class="sm-collection-item-slug">${entries.length} entries</span></div>`;
+
+    if (!entries.length) {
+      html += '<div class="sm-site-empty">No entries yet.</div>';
+    } else {
+      for (const entry of entries) {
+        html += `<div class="sm-entry-card" data-entry-id="${entry.id}" data-col-slug="${esc(col.slug)}">
+          <div class="sm-entry-card-header">
+            <strong>${esc(entry.slug)}</strong>
+            <button class="sm-entry-delete" title="Delete">&times;</button>
+          </div>
+          <div class="sm-entry-fields">`;
+        for (const field of (col.schema || [])) {
+          const val = entry.data?.[field.name] ?? '';
+          const inputType = field.type === 'number' ? 'number' : field.type === 'url' || field.type === 'image' ? 'url' : 'text';
+          if (field.type === 'richtext') {
+            html += `<label class="sm-entry-field"><span>${esc(field.name)}</span><textarea data-entry-field="${esc(field.name)}">${esc(String(val))}</textarea></label>`;
+          } else if (field.type === 'boolean') {
+            html += `<label class="sm-entry-field sm-entry-field-bool"><input type="checkbox" data-entry-field="${esc(field.name)}" ${val ? 'checked' : ''}> ${esc(field.name)}</label>`;
+          } else {
+            html += `<label class="sm-entry-field"><span>${esc(field.name)}</span><input type="${inputType}" value="${esc(String(val))}" data-entry-field="${esc(field.name)}"></label>`;
+          }
+        }
+        html += `</div></div>`;
+      }
+    }
+
+    siteBody.innerHTML = html;
+
+    document.getElementById('sm-col-back').addEventListener('click', renderCollectionsList);
+
+    siteBody.querySelectorAll('.sm-entry-card').forEach(card => {
+      const entryId = card.dataset.entryId;
+      const colSlug = card.dataset.colSlug;
+
+      card.querySelectorAll('[data-entry-field]').forEach(input => {
+        const field = input.dataset.entryField;
+        const handler = debounce(async () => {
+          const val = input.type === 'checkbox' ? input.checked : input.value;
+          try {
+            await fetch(`/api/collections/${colSlug}/entries/${entryId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: { [field]: val } }),
+            });
+            toast(`${field} saved`);
+          } catch { toast('Save failed'); }
+        }, 600);
+        input.addEventListener('change', handler);
+        if (input.tagName === 'INPUT' && input.type === 'text') input.addEventListener('input', handler);
+        if (input.tagName === 'TEXTAREA') input.addEventListener('input', handler);
+      });
+
+      card.querySelector('.sm-entry-delete').addEventListener('click', async () => {
+        if (!confirm('Delete this entry?')) return;
+        await fetch(`/api/collections/${colSlug}/entries/${entryId}`, { method: 'DELETE' });
+        card.remove();
+        toast('Entry deleted');
+      });
+    });
+  }
+
+  function debounce(fn, ms) {
+    let timer;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+  }
+
+  // ── Media Tab ──
+
+  async function loadMediaTab() {
+    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
+    try {
+      const res = await fetch('/api/media');
+      if (!res.ok) throw new Error('Failed to load');
+      const media = await res.json();
+      renderMediaGrid(media);
+    } catch (err) {
+      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
+    }
+  }
+
+  function renderMediaGrid(media) {
+    let html = `<div class="sm-site-actions">
+      <button class="sm-btn sm-site-add-btn" id="sm-upload-media">+ Upload</button>
+    </div>`;
+
+    if (!media.length) {
+      html += '<div class="sm-site-empty">No media yet. Upload files to use on your site.</div>';
+    } else {
+      html += '<div class="sm-media-grid">';
+      for (const item of media) {
+        const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.path);
+        html += `<div class="sm-media-card" data-media-id="${item.id}" data-media-path="${esc(item.path)}">
+          <div class="sm-media-card-thumb">
+            ${isImage ? `<img src="${esc(item.path)}" loading="lazy">` : `<span class="sm-media-card-icon">${esc(item.path.split('.').pop().toUpperCase())}</span>`}
+          </div>
+          <div class="sm-media-card-info">
+            <span class="sm-media-card-name">${esc(item.originalName || item.path.split('/').pop())}</span>
+          </div>
+          <div class="sm-media-card-actions">
+            <button class="sm-media-copy" title="Copy path">Copy</button>
+            <button class="sm-media-delete" title="Delete">&times;</button>
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    siteBody.innerHTML = html;
+
+    document.getElementById('sm-upload-media').addEventListener('click', () => {
+      uploadAndReplace(path => {
+        loadMediaTab();
+        toast('Uploaded ' + path.split('/').pop());
+      });
+    });
+
+    siteBody.querySelectorAll('.sm-media-card').forEach(card => {
+      card.querySelector('.sm-media-copy').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = card.dataset.mediaPath;
+        navigator.clipboard.writeText(p).then(() => toast('Copied: ' + p)).catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = p;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+          toast('Copied: ' + p);
+        });
+      });
+
+      card.querySelector('.sm-media-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Delete this file?')) return;
+        await fetch(`/api/media/${card.dataset.mediaId}`, { method: 'DELETE' });
+        card.remove();
+        toast('Deleted');
+      });
+    });
+  }
+
   function addChatMessage(role, text) {
     const div = document.createElement('div');
     div.className = `sm-chat-msg sm-chat-${role === 'assistant' ? 'ai' : role}`;
@@ -550,7 +1082,8 @@
 
     document.body.classList.add('sm-body-offset');
     injectLabels();
-    markAIImages();
+    markEditableImages();
+    if (imagePanelOpen) scanPageImages();
     injectCollectionLabels();
     adjustFixedElements();
     markDirty();
@@ -668,58 +1201,99 @@
 
   injectLabels();
 
-  // ── Mark AI-sourced images with a badge ──
+  // ── Editable image badges ──
 
-  function markAIImages() {
-    document.querySelectorAll('.sm-ai-img-badge').forEach(el => el.remove());
+  function isLocalImage(src) {
+    return src && (src.startsWith('/media/') || src.startsWith('/content/'));
+  }
+
+  function isExternalImage(src) {
+    return src && (src.startsWith('http://') || src.startsWith('https://'));
+  }
+
+  function uploadAndReplace(callback) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) { input.remove(); return; }
+      const form = new FormData();
+      form.append('image', file);
+      try {
+        const res = await fetch('/api/media/upload', { method: 'POST', body: form });
+        if (!res.ok) throw new Error('Upload failed');
+        const data = await res.json();
+        callback(data.path);
+        markDirty();
+        toast('Image replaced');
+      } catch(e) {
+        toast('Upload failed');
+      }
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  function makeBadge(label, title) {
+    const badge = document.createElement('span');
+    badge.className = 'sm-img-badge';
+    badge.setAttribute('data-sm-overlay', '');
+    badge.textContent = label;
+    badge.title = title;
+    return badge;
+  }
+
+  function markEditableImages() {
+    document.querySelectorAll('.sm-img-badge').forEach(el => el.remove());
 
     document.querySelectorAll('img').forEach(img => {
       if (img.closest('[data-sm-overlay]')) return;
       const src = img.getAttribute('src') || '';
-      if (!src.startsWith('/media/placeholder/')) return;
+      if (!src) return;
+
+      const isPlaceholder = src.startsWith('/media/placeholder/');
+      const isExternal = isExternalImage(src);
+      const label = isPlaceholder ? 'AI' : isExternal ? 'EXT' : 'IMG';
+      const title = isPlaceholder ? 'AI placeholder — click to replace'
+        : isExternal ? 'External image — click to replace with upload'
+        : 'Click to replace image';
 
       const parent = img.parentElement;
-      const parentStyle = getComputedStyle(parent);
-      if (parentStyle.position === 'static') parent.style.position = 'relative';
+      if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
 
-      const badge = document.createElement('span');
-      badge.className = 'sm-ai-img-badge';
-      badge.setAttribute('data-sm-overlay', '');
-      badge.textContent = 'AI';
-      badge.title = 'AI-generated placeholder — click to replace';
-      badge.addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.style.display = 'none';
-        input.addEventListener('change', async () => {
-          const file = input.files[0];
-          if (!file) return;
-          const form = new FormData();
-          form.append('image', file);
-          try {
-            const res = await fetch('/api/media/upload', { method: 'POST', body: form });
-            if (res.ok) {
-              const data = await res.json();
-              img.src = data.path;
-              badge.remove();
-              markDirty();
-              toast('Image replaced');
-            }
-          } catch(e) {
-            toast('Upload failed');
-          }
-          input.remove();
-        });
-        document.body.appendChild(input);
-        input.click();
+      const badge = makeBadge(label, title);
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        uploadAndReplace(path => { img.src = path; });
       });
-
       parent.appendChild(badge);
+    });
+
+    document.querySelectorAll('[data-section], [data-partial]').forEach(el => {
+      if (el.closest('[data-sm-overlay]')) return;
+      const style = getComputedStyle(el);
+      const bg = style.backgroundImage;
+      if (!bg || bg === 'none') return;
+      if (!bg.includes('url(')) return;
+
+      if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+
+      const badge = makeBadge('BG', 'Background image — click to replace');
+      badge.classList.add('sm-img-badge-bg');
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        uploadAndReplace(path => {
+          el.style.backgroundImage = `url('${path}')`;
+        });
+      });
+      el.appendChild(badge);
     });
   }
 
-  markAIImages();
+  markEditableImages();
 
   // ── Collection directive labels & popover ──
 

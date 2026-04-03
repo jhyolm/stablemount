@@ -118,7 +118,8 @@ export function extractTokens(figmaData) {
 }
 
 export function extractStructure(figmaData, nodeId) {
-  const target = nodeId ? findNode(figmaData.document, nodeId) : figmaData.document;
+  let target = nodeId ? findNode(figmaData.document, nodeId) : figmaData.document;
+  if (!target) target = figmaData.document;
   if (!target) return [];
 
   const sections = [];
