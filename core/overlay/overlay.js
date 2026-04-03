@@ -866,7 +866,7 @@
 
     let html = '<div class="sm-component-grid">';
     for (const p of partials) {
-      const isUsed = usedOnPage.has(p.slug);
+      const isUsed = usedOnPage.has(p.name);
       html += (UI().renderComponentCard || renderComponentCardFallback)(p, { isUsed, showFind: true });
     }
     html += '</div>';
@@ -874,23 +874,24 @@
 
     const mountPreview = UI().mountComponentPreview || null;
     for (const p of partials) {
-      const previewEl = siteBody.querySelector(`[data-comp-preview="${p.slug}"]`);
+      const previewEl = siteBody.querySelector(`[data-comp-preview="${p.id}"]`);
       if (!previewEl) continue;
       if (mountPreview) {
-        await mountPreview(previewEl, p.slug, siteCSS);
+        await mountPreview(previewEl, p.id, siteCSS);
       }
     }
 
     siteBody.querySelectorAll('.sm-comp-card').forEach(card => {
-      const compSlug = card.dataset.compSlug;
+      const compName = card.dataset.compName;
+      const compId = card.dataset.compId;
 
       const findBtn = card.querySelector('.sm-comp-find');
       if (findBtn) findBtn.addEventListener('click', () => {
-        let el = document.querySelector(`[data-partial="${compSlug}"]`);
+        let el = document.querySelector(`[data-partial="${compName}"]`);
         if (!el) {
           const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
           while (walker.nextNode()) {
-            if (walker.currentNode.nodeValue.includes(`@partial:${compSlug}:begin`)) {
+            if (walker.currentNode.nodeValue.includes(`@partial:${compName}:begin`)) {
               el = walker.currentNode.nextElementSibling;
               break;
             }
@@ -906,16 +907,16 @@
 
       card.querySelector('.sm-comp-edit').addEventListener('click', async () => {
         try {
-          const res = await fetch(`/api/partials/${compSlug}/html`);
+          const res = await fetch(`/api/partials/${compId}/html`);
           if (!res.ok) throw new Error('Load failed');
           const html = await res.text();
-          showComponentEditor(compSlug, html);
+          showComponentEditor(compId, html);
         } catch (err) { toast('Error: ' + err.message); }
       });
 
       card.querySelector('.sm-comp-delete').addEventListener('click', async () => {
-        if (!confirm(`Delete component "${compSlug}"?`)) return;
-        await fetch(`/api/partials/${compSlug}`, { method: 'DELETE' });
+        if (!confirm(`Delete component "${compName}"?`)) return;
+        await fetch(`/api/partials/${compId}`, { method: 'DELETE' });
         card.remove();
         toast('Component deleted');
       });
@@ -925,13 +926,13 @@
   function renderComponentCardFallback(p, opts) {
     return (UI().renderComponentCard || function(partial, o) {
       const { isUsed = false, showFind = false } = o || {};
-      return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-slug="${esc(partial.slug)}" data-comp-id="${esc(partial.id)}">
+      return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-name="${esc(partial.name)}" data-comp-id="${esc(partial.id)}">
         <div class="sm-comp-card-header">
-          <span class="sm-comp-card-name">${esc(partial.name || partial.slug)}</span>
+          <span class="sm-comp-card-name">${esc(partial.name)}</span>
           ${isUsed ? '<span class="sm-comp-badge sm-comp-badge-active">ON PAGE</span>' : ''}
           ${partial.isPattern ? '<span class="sm-comp-badge sm-comp-badge-pattern">PATTERN</span>' : '<span class="sm-comp-badge sm-comp-badge-partial">PARTIAL</span>'}
         </div>
-        <div class="sm-comp-card-preview" data-comp-preview="${esc(partial.slug)}"></div>
+        <div class="sm-comp-card-preview" data-comp-preview="${esc(partial.id)}"></div>
         <div class="sm-comp-card-actions">
           ${showFind ? `<button class="sm-comp-btn sm-comp-find" ${!isUsed ? 'disabled' : ''}>Find</button>` : ''}
           <button class="sm-comp-btn sm-comp-edit">Edit</button>
@@ -941,13 +942,13 @@
     })(p, opts);
   }
 
-  function showComponentEditor(compSlug, html) {
+  function showComponentEditor(compId, html) {
     const modal = document.createElement('div');
     modal.className = 'sm-site-modal';
     modal.setAttribute('data-sm-overlay', '');
     modal.innerHTML = `
       <div class="sm-site-modal-box sm-component-editor-box">
-        <h3>Edit: ${esc(compSlug)}</h3>
+        <h3>Edit Component</h3>
         <textarea class="sm-component-editor-textarea" id="sm-comp-editor">${esc(html)}</textarea>
         <div class="sm-site-modal-actions">
           <button class="sm-btn" id="sm-comp-save">Save</button>
@@ -959,7 +960,7 @@
     modal.querySelector('#sm-comp-cancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#sm-comp-save').addEventListener('click', async () => {
       try {
-        const res = await fetch(`/api/partials/${compSlug}/html`, {
+        const res = await fetch(`/api/partials/${compId}/html`, {
           method: 'PUT',
           headers: { 'Content-Type': 'text/html' },
           body: modal.querySelector('#sm-comp-editor').value,

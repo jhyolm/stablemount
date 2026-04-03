@@ -36,14 +36,14 @@ export async function fetchSiteCSS(pages) {
 
 export function renderComponentCard(partial, opts = {}) {
   const { isUsed = false, showFind = false } = opts;
-  return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-slug="${esc(partial.slug)}" data-comp-id="${esc(partial.id)}">
+  return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-name="${esc(partial.name)}" data-comp-id="${esc(partial.id)}">
     <div class="sm-comp-card-header">
-      <span class="sm-comp-card-name">${esc(partial.name || partial.slug)}</span>
+      <span class="sm-comp-card-name">${esc(partial.name)}</span>
       ${isUsed ? '<span class="sm-comp-badge sm-comp-badge-active">ON PAGE</span>' : ''}
       ${partial.isPattern ? '<span class="sm-comp-badge sm-comp-badge-pattern">PATTERN</span>' : '<span class="sm-comp-badge sm-comp-badge-partial">PARTIAL</span>'}
       ${partial.weight ? `<span class="sm-comp-badge sm-comp-badge-weight">${esc(partial.weight)}</span>` : ''}
     </div>
-    <div class="sm-comp-card-preview" data-comp-preview="${esc(partial.slug)}"></div>
+    <div class="sm-comp-card-preview" data-comp-preview="${esc(partial.id)}"></div>
     <div class="sm-comp-card-actions">
       ${showFind ? `<button class="sm-comp-btn sm-comp-find" ${!isUsed ? 'disabled' : ''}>Find</button>` : ''}
       <button class="sm-comp-btn sm-comp-edit">Edit</button>
@@ -52,9 +52,9 @@ export function renderComponentCard(partial, opts = {}) {
   </div>`;
 }
 
-export async function mountComponentPreview(container, partialSlug, siteCSS) {
+export async function mountComponentPreview(container, partialId, siteCSS) {
   try {
-    const res = await fetch(`/api/partials/${partialSlug}/html`);
+    const res = await fetch(`/api/partials/${partialId}/html`);
     if (!res.ok) return;
     const html = await res.text();
     if (!html.trim()) {
