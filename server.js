@@ -54,6 +54,11 @@ const MIME = {
   '.ico': 'image/x-icon', '.webp': 'image/webp',
 };
 
+const sseClients = new Set();
+function broadcast(type) {
+  for (const c of sseClients) c.write(`event: data-change\ndata: ${type}\n\n`);
+}
+
 function sanitizeSlug(s) {
   return s.replace(/[^a-zA-Z0-9_-]/g, '');
 }
@@ -110,7 +115,7 @@ function injectOverlay(html, slug, pageTitle) {
   const css = '<link rel="stylesheet" href="/shared/ui.css" data-sm-overlay>\n<link rel="stylesheet" href="/overlay/overlay.css" data-sm-overlay>';
   const uiLoader = '<script type="module" data-sm-overlay>import * as ui from "/shared/ui.js"; window.__SM_UI__ = ui;</script>';
   const js = '<script src="/overlay/overlay.js" data-sm-overlay defer></script>';
-  const lr = '<script data-sm-overlay>(() => { let r = false; const e = new EventSource("/api/livereload"); e.onopen = () => { if (r) location.reload(); }; e.onerror = () => { r = true; }; })();</script>';
+  const lr = '<script data-sm-overlay>(() => { let r = false; const e = new EventSource("/api/livereload"); e.onopen = () => { if (r) location.reload(); }; e.onerror = () => { r = true; }; e.addEventListener("data-change", ev => window.dispatchEvent(new CustomEvent("sm:data-change", { detail: ev.data }))); })();</script>';
   html = html.replace('</head>', `${css}\n${config}\n</head>`);
   html = html.replace('</body>', `${uiLoader}\n${js}\n${lr}\n</body>`);
   return html;
@@ -316,8 +321,9 @@ const server = createServer(async (req, res) => {
         'Connection': 'keep-alive',
       });
       res.write('data: connected\n\n');
+      sseClients.add(res);
       const keepalive = setInterval(() => res.write(':\n\n'), 15000);
-      req.on('close', () => clearInterval(keepalive));
+      req.on('close', () => { clearInterval(keepalive); sseClients.delete(res); });
       return;
     }
 
@@ -338,7 +344,7 @@ const server = createServer(async (req, res) => {
     // ── API: Media ──
     if (path === '/api/media' && method === 'GET') return send(res, 200, listMedia());
     let m = path.match(/^\/api\/media\/([^/]+)$/);
-    if (m && method === 'DELETE') { deleteMedia(m[1]); return send(res, 204, ''); }
+    if (m && method === 'DELETE') { deleteMedia(m[1]); broadcast('media'); return send(res, 204, ''); }
 
     if (path === '/api/media/upload' && method === 'POST') {
       const contentType = req.headers['content-type'] || '';
@@ -378,38 +384,42 @@ const server = createServer(async (req, res) => {
       const mimeType = MIME[ext] || 'application/octet-stream';
       const item = addMedia({ path: mediaPath, originalName: fileName, size: fileBuffer.length, mimeType });
 
+      broadcast('media');
       return send(res, 200, { ...item, path: mediaPath, name });
     }
 
     // ── API: Decisions ──
     if (path === '/api/decisions' && method === 'GET') return send(res, 200, listDecisions());
-    if (path === '/api/decisions' && method === 'POST') return send(res, 201, createDecision(await jsonBody(req)));
+    if (path === '/api/decisions' && method === 'POST') { const r = createDecision(await jsonBody(req)); broadcast('decisions'); return send(res, 201, r); }
     m = path.match(/^\/api\/decisions\/([^/]+)$/);
     if (m && method === 'PUT') {
       const r = updateDecision(m[1], await jsonBody(req));
+      if (r) broadcast('decisions');
       return r ? send(res, 200, r) : send(res, 404, { error: 'Not found' });
     }
-    if (m && method === 'DELETE') { deleteDecision(m[1]); return send(res, 204, ''); }
+    if (m && method === 'DELETE') { deleteDecision(m[1]); broadcast('decisions'); return send(res, 204, ''); }
 
     // ── API: Partials ──
     if (path === '/api/partials' && method === 'GET') return send(res, 200, listPartials());
-    if (path === '/api/partials' && method === 'POST') return send(res, 201, createPartial(await jsonBody(req)));
+    if (path === '/api/partials' && method === 'POST') { const r = createPartial(await jsonBody(req)); broadcast('partials'); return send(res, 201, r); }
     m = path.match(/^\/api\/partials\/([^/]+)\/html$/);
     if (m && method === 'GET') return send(res, 200, getPartialHTML(m[1]), 'text/html');
     if (m && method === 'PUT') {
       updatePartial(m[1], { html: await readBody(req) });
+      broadcast('partials');
       return send(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/partials\/([^/]+)$/);
     if (m && method === 'PUT') {
       const r = updatePartial(m[1], await jsonBody(req));
+      if (r) broadcast('partials');
       return r ? send(res, 200, r) : send(res, 404, { error: 'Not found' });
     }
-    if (m && method === 'DELETE') { deletePartial(m[1]); return send(res, 204, ''); }
+    if (m && method === 'DELETE') { deletePartial(m[1]); broadcast('partials'); return send(res, 204, ''); }
 
     // ── API: Pages ──
     if (path === '/api/pages' && method === 'GET') return send(res, 200, listPages());
-    if (path === '/api/pages' && method === 'POST') return send(res, 201, createPage(await jsonBody(req)));
+    if (path === '/api/pages' && method === 'POST') { const r = createPage(await jsonBody(req)); broadcast('pages'); return send(res, 201, r); }
     m = path.match(/^\/api\/pages\/([^/]+)\/html$/);
     if (m && method === 'PUT') {
       let html = await readBody(req);
@@ -418,14 +428,16 @@ const server = createServer(async (req, res) => {
       html = await runTransformHook(extensions.hooks, 'onPageSave', html, m[1]);
       savePageHTML(m[1], html);
       runHook(extensions.hooks, 'onContentChange', { type: 'page', slug: m[1], action: 'save' });
+      broadcast('pages');
       return send(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/pages\/([^/]+)$/);
     if (m && method === 'PUT') {
       const r = updatePage(m[1], await jsonBody(req));
+      if (r) broadcast('pages');
       return r ? send(res, 200, r) : send(res, 404, { error: 'Not found' });
     }
-    if (m && method === 'DELETE') { deletePage(m[1]); return send(res, 204, ''); }
+    if (m && method === 'DELETE') { deletePage(m[1]); broadcast('pages'); return send(res, 204, ''); }
 
     // ── API: Version History ──
     m = path.match(/^\/api\/history\/(pages|partials)\/([^/]+)$/);

@@ -656,6 +656,16 @@
   document.getElementById('sm-site-toggle').addEventListener('click', toggleSitePanel);
   document.getElementById('sm-site-close').addEventListener('click', toggleSitePanel);
 
+  window.addEventListener('sm:data-change', e => {
+    const type = e.detail;
+    if (type === 'partials' || type === 'pages') {
+      location.reload();
+      return;
+    }
+    if (sitePanelOpen) loadSiteTab();
+    if (imagePanelOpen && type === 'media') scanPageImages();
+  });
+
   function loadSiteTab() {
     sitePanel.classList.toggle('sm-site-wide', sitePanelTab === 'components');
     if (sitePanelTab === 'decisions') loadDecisionsTab();
