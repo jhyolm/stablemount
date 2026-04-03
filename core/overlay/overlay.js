@@ -621,7 +621,7 @@
     <div class="sm-site-panel-header">
       <div class="sm-site-tabs">
         <button class="sm-site-tab active" data-site-tab="decisions">Decisions</button>
-        <button class="sm-site-tab" data-site-tab="collections">Collections</button>
+        <button class="sm-site-tab" data-site-tab="components">Components</button>
         <button class="sm-site-tab" data-site-tab="media">Media</button>
       </div>
       <button class="sm-site-panel-close" id="sm-site-close">&times;</button>
@@ -644,15 +644,20 @@
     sitePanelOpen = !sitePanelOpen;
     sitePanel.classList.toggle('open', sitePanelOpen);
     document.getElementById('sm-site-toggle').classList.toggle('active', sitePanelOpen);
-    if (sitePanelOpen) loadSiteTab();
+    if (sitePanelOpen) {
+      loadSiteTab();
+    } else {
+      sitePanel.classList.remove('sm-site-wide');
+    }
   }
 
   document.getElementById('sm-site-toggle').addEventListener('click', toggleSitePanel);
   document.getElementById('sm-site-close').addEventListener('click', toggleSitePanel);
 
   function loadSiteTab() {
+    sitePanel.classList.toggle('sm-site-wide', sitePanelTab === 'components');
     if (sitePanelTab === 'decisions') loadDecisionsTab();
-    else if (sitePanelTab === 'collections') loadCollectionsTab();
+    else if (sitePanelTab === 'components') loadComponentsTab();
     else if (sitePanelTab === 'media') loadMediaTab();
   }
 
@@ -814,131 +819,163 @@
     });
   }
 
-  // ── Collections Tab ──
-
-  let collectionsCache = [];
-
-  async function loadCollectionsTab() {
-    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
-    try {
-      const res = await fetch('/api/collections');
-      if (!res.ok) throw new Error('Failed to load');
-      collectionsCache = await res.json();
-      renderCollectionsList();
-    } catch (err) {
-      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
-    }
-  }
-
-  function renderCollectionsList() {
-    if (!collectionsCache.length) {
-      siteBody.innerHTML = '<div class="sm-site-empty">No collections yet. Create one from the dashboard or via AI chat.</div>';
-      return;
-    }
-
-    let html = '';
-    for (const col of collectionsCache) {
-      const fields = (col.schema || []).map(f => f.name).join(', ');
-      html += `<div class="sm-collection-item" data-col-slug="${esc(col.slug)}">
-        <div class="sm-collection-item-header">
-          <strong>${esc(col.name)}</strong>
-          <span class="sm-collection-item-slug">/${esc(col.slug)}</span>
-          <span class="sm-collection-item-chevron">&#9654;</span>
-        </div>
-        <div class="sm-collection-item-fields">${esc(fields) || 'no schema'}</div>
-      </div>`;
-    }
-    siteBody.innerHTML = html;
-
-    siteBody.querySelectorAll('.sm-collection-item').forEach(item => {
-      item.addEventListener('click', () => {
-        loadCollectionEntries(item.dataset.colSlug);
-      });
-    });
-  }
-
-  async function loadCollectionEntries(colSlug) {
-    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
-    const col = collectionsCache.find(c => c.slug === colSlug);
-    if (!col) return;
-
-    try {
-      const res = await fetch(`/api/collections/${colSlug}/entries`);
-      if (!res.ok) throw new Error('Failed to load');
-      const entries = await res.json();
-      renderCollectionEntries(col, entries);
-    } catch (err) {
-      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
-    }
-  }
-
-  function renderCollectionEntries(col, entries) {
-    let html = `<div class="sm-collection-back" id="sm-col-back">&larr; All Collections</div>`;
-    html += `<div class="sm-collection-detail-header"><strong>${esc(col.name)}</strong> <span class="sm-collection-item-slug">${entries.length} entries</span></div>`;
-
-    if (!entries.length) {
-      html += '<div class="sm-site-empty">No entries yet.</div>';
-    } else {
-      for (const entry of entries) {
-        html += `<div class="sm-entry-card" data-entry-id="${entry.id}" data-col-slug="${esc(col.slug)}">
-          <div class="sm-entry-card-header">
-            <strong>${esc(entry.slug)}</strong>
-            <button class="sm-entry-delete" title="Delete">&times;</button>
-          </div>
-          <div class="sm-entry-fields">`;
-        for (const field of (col.schema || [])) {
-          const val = entry.data?.[field.name] ?? '';
-          const inputType = field.type === 'number' ? 'number' : field.type === 'url' || field.type === 'image' ? 'url' : 'text';
-          if (field.type === 'richtext') {
-            html += `<label class="sm-entry-field"><span>${esc(field.name)}</span><textarea data-entry-field="${esc(field.name)}">${esc(String(val))}</textarea></label>`;
-          } else if (field.type === 'boolean') {
-            html += `<label class="sm-entry-field sm-entry-field-bool"><input type="checkbox" data-entry-field="${esc(field.name)}" ${val ? 'checked' : ''}> ${esc(field.name)}</label>`;
-          } else {
-            html += `<label class="sm-entry-field"><span>${esc(field.name)}</span><input type="${inputType}" value="${esc(String(val))}" data-entry-field="${esc(field.name)}"></label>`;
-          }
-        }
-        html += `</div></div>`;
-      }
-    }
-
-    siteBody.innerHTML = html;
-
-    document.getElementById('sm-col-back').addEventListener('click', renderCollectionsList);
-
-    siteBody.querySelectorAll('.sm-entry-card').forEach(card => {
-      const entryId = card.dataset.entryId;
-      const colSlug = card.dataset.colSlug;
-
-      card.querySelectorAll('[data-entry-field]').forEach(input => {
-        const field = input.dataset.entryField;
-        const handler = debounce(async () => {
-          const val = input.type === 'checkbox' ? input.checked : input.value;
-          try {
-            await fetch(`/api/collections/${colSlug}/entries/${entryId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: { [field]: val } }),
-            });
-            toast(`${field} saved`);
-          } catch { toast('Save failed'); }
-        }, 600);
-        input.addEventListener('change', handler);
-        if (input.tagName === 'INPUT' && input.type === 'text') input.addEventListener('input', handler);
-        if (input.tagName === 'TEXTAREA') input.addEventListener('input', handler);
-      });
-
-      card.querySelector('.sm-entry-delete').addEventListener('click', async () => {
-        if (!confirm('Delete this entry?')) return;
-        await fetch(`/api/collections/${colSlug}/entries/${entryId}`, { method: 'DELETE' });
-        card.remove();
-        toast('Entry deleted');
-      });
-    });
-  }
+  // ── Components Tab ──
 
   function debounce(fn, ms) {
     let timer;
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+  }
+
+  function getPagePartialSlugs() {
+    const slugs = new Set();
+    document.querySelectorAll('[data-partial]').forEach(el => {
+      if (!el.closest('[data-sm-overlay]')) slugs.add(el.getAttribute('data-partial'));
+    });
+    return slugs;
+  }
+
+  async function loadComponentsTab() {
+    siteBody.innerHTML = '<div class="sm-site-loading">Loading…</div>';
+    try {
+      const res = await fetch('/api/partials');
+      if (!res.ok) throw new Error('Failed to load');
+      const partials = await res.json();
+      renderComponents(partials);
+    } catch (err) {
+      siteBody.innerHTML = `<div class="sm-site-empty">Error: ${err.message}</div>`;
+    }
+  }
+
+  async function renderComponents(partials) {
+    const usedOnPage = getPagePartialSlugs();
+
+    if (!partials.length) {
+      siteBody.innerHTML = '<div class="sm-site-empty">No components yet. Select a section on the page and click "Save as Component" to create one.</div>';
+      return;
+    }
+
+    let siteCSS = '';
+    try {
+      const cssRes = await fetch(`/api/pages/${slug}/html`);
+      if (cssRes.ok) {
+        const html = await cssRes.text();
+        const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi);
+        if (styleMatch) siteCSS = styleMatch.map(s => s.replace(/<\/?style[^>]*>/gi, '')).join('\n');
+      }
+    } catch {}
+
+    let html = '<div class="sm-component-grid">';
+    for (const p of partials) {
+      const isUsed = usedOnPage.has(p.slug);
+      html += `<div class="sm-component-card${isUsed ? ' sm-component-used' : ''}" data-comp-slug="${esc(p.slug)}">
+        <div class="sm-component-card-header">
+          <span class="sm-component-card-name">${esc(p.name || p.slug)}</span>
+          ${isUsed ? '<span class="sm-component-badge-used">ON PAGE</span>' : ''}
+          ${p.isPattern ? '<span class="sm-component-badge-pattern">PATTERN</span>' : ''}
+        </div>
+        <div class="sm-component-preview" data-comp-preview="${esc(p.slug)}"></div>
+        <div class="sm-component-card-actions">
+          <button class="sm-component-btn sm-component-scroll" ${!isUsed ? 'disabled title="Not on this page"' : 'title="Scroll to on page"'}>Find</button>
+          <button class="sm-component-btn sm-component-edit" title="Edit HTML">Edit</button>
+          <button class="sm-component-btn sm-component-delete" title="Delete">&times;</button>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    siteBody.innerHTML = html;
+
+    for (const p of partials) {
+      const previewEl = siteBody.querySelector(`[data-comp-preview="${p.slug}"]`);
+      if (!previewEl) continue;
+      try {
+        const htmlRes = await fetch(`/api/partials/${p.slug}/html`);
+        if (!htmlRes.ok) continue;
+        const partialHTML = await htmlRes.text();
+        const iframe = document.createElement('iframe');
+        iframe.className = 'sm-component-iframe';
+        iframe.sandbox = 'allow-same-origin';
+        iframe.setAttribute('data-sm-overlay', '');
+        previewEl.appendChild(iframe);
+        const doc = iframe.contentDocument;
+        doc.open();
+        doc.write(`<!DOCTYPE html><html><head><style>
+          body { margin: 0; overflow: hidden; background: #fff; transform-origin: top left; }
+          ${siteCSS}
+        </style></head><body>${partialHTML}</body></html>`);
+        doc.close();
+        requestAnimationFrame(() => {
+          const h = doc.body.scrollHeight;
+          const scale = Math.min(1, 328 / (doc.body.scrollWidth || 328));
+          iframe.style.transform = `scale(${scale})`;
+          iframe.style.height = (h || 100) + 'px';
+          iframe.style.width = (100 / scale) + '%';
+          previewEl.style.height = Math.min(120, h * scale) + 'px';
+        });
+      } catch {}
+    }
+
+    siteBody.querySelectorAll('.sm-component-card').forEach(card => {
+      const compSlug = card.dataset.compSlug;
+
+      card.querySelector('.sm-component-scroll')?.addEventListener('click', () => {
+        const el = document.querySelector(`[data-partial="${compSlug}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.style.outline = '2px solid #0891b2';
+          el.style.outlineOffset = '4px';
+          setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2000);
+        }
+      });
+
+      card.querySelector('.sm-component-edit').addEventListener('click', async () => {
+        try {
+          const res = await fetch(`/api/partials/${compSlug}/html`);
+          if (!res.ok) throw new Error('Load failed');
+          const html = await res.text();
+          showComponentEditor(compSlug, html);
+        } catch (err) { toast('Error: ' + err.message); }
+      });
+
+      card.querySelector('.sm-component-delete').addEventListener('click', async () => {
+        if (!confirm(`Delete component "${compSlug}"?`)) return;
+        await fetch(`/api/partials/${compSlug}`, { method: 'DELETE' });
+        card.remove();
+        toast('Component deleted');
+      });
+    });
+  }
+
+  function showComponentEditor(compSlug, html) {
+    const modal = document.createElement('div');
+    modal.className = 'sm-site-modal';
+    modal.setAttribute('data-sm-overlay', '');
+    modal.innerHTML = `
+      <div class="sm-site-modal-box sm-component-editor-box">
+        <h3>Edit: ${esc(compSlug)}</h3>
+        <textarea class="sm-component-editor-textarea" id="sm-comp-editor">${esc(html)}</textarea>
+        <div class="sm-site-modal-actions">
+          <button class="sm-btn" id="sm-comp-save">Save</button>
+          <button class="sm-btn sm-btn-cancel" id="sm-comp-cancel">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const textarea = modal.querySelector('#sm-comp-editor');
+    textarea.focus();
+
+    modal.querySelector('#sm-comp-cancel').addEventListener('click', () => modal.remove());
+    modal.querySelector('#sm-comp-save').addEventListener('click', async () => {
+      try {
+        const res = await fetch(`/api/partials/${compSlug}/html`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/html' },
+          body: textarea.value,
+        });
+        if (!res.ok) throw new Error('Save failed');
+        modal.remove();
+        toast('Component saved');
+        loadComponentsTab();
+      } catch (err) { toast('Error: ' + err.message); }
+    });
   }
 
   // ── Media Tab ──

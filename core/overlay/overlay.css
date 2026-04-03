@@ -417,10 +417,12 @@
   flex-direction: column;
   z-index: 99999;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  transition: left 0.25s ease;
+  transition: left 0.25s ease, width 0.25s ease;
   box-shadow: 4px 0 20px rgba(0,0,0,0.3);
 }
 .sm-site-panel.open { left: 0; }
+.sm-site-panel.sm-site-wide { width: 70vw; left: -72vw; }
+.sm-site-panel.sm-site-wide.open { left: 0; }
 
 .sm-site-panel-header {
   display: flex;
@@ -585,135 +587,115 @@
 }
 .sm-decision-delete:hover { color: #ef4444; }
 
-/* ── Collections ── */
+/* ── Components ── */
 
-.sm-collection-item {
-  padding: 10px 12px;
-  border-radius: 6px;
-  margin-bottom: 4px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.sm-collection-item:hover { background: #1e293b; }
-
-.sm-collection-item-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.sm-collection-item-header strong {
-  font-size: 13px;
-  color: #e2e8f0;
-}
-.sm-collection-item-slug {
-  font-size: 11px;
-  color: #64748b;
-}
-.sm-collection-item-chevron {
-  font-size: 10px;
-  color: #475569;
-  margin-left: auto;
-  transition: transform 0.15s;
-}
-.sm-collection-item:hover .sm-collection-item-chevron { color: #94a3b8; }
-.sm-collection-item-fields {
-  font-size: 11px;
-  color: #475569;
-  margin-top: 2px;
-}
-
-.sm-collection-back {
-  font-size: 12px;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 8px 4px;
-  transition: color 0.15s;
-}
-.sm-collection-back:hover { color: #e2e8f0; }
-
-.sm-collection-detail-header {
-  padding: 4px 8px 12px;
-  border-bottom: 1px solid #1e293b;
-  margin-bottom: 8px;
-}
-.sm-collection-detail-header strong {
-  font-size: 14px;
-  color: #e2e8f0;
-}
-
-.sm-entry-card {
+.sm-component-card {
   background: #1e293b;
   border-radius: 6px;
   margin-bottom: 8px;
   overflow: hidden;
-}
-
-.sm-entry-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid #334155;
-}
-.sm-entry-card-header strong {
-  font-size: 12px;
-  color: #e2e8f0;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-
-.sm-entry-delete {
-  background: none;
-  border: none;
-  color: #475569;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-.sm-entry-delete:hover { color: #ef4444; }
-
-.sm-entry-fields {
-  padding: 8px 12px;
-}
-
-.sm-entry-field {
-  display: block;
-  margin-bottom: 6px;
-}
-.sm-entry-field span {
-  display: block;
-  font-size: 10px;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 2px;
-}
-.sm-entry-field input,
-.sm-entry-field textarea {
-  width: 100%;
-  background: #0f172a;
-  color: #e2e8f0;
   border: 1px solid #334155;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-family: inherit;
+  transition: border-color 0.15s;
 }
-.sm-entry-field textarea {
-  min-height: 48px;
-  resize: vertical;
-}
-.sm-entry-field input:focus,
-.sm-entry-field textarea:focus { outline: none; border-color: #0891b2; }
+.sm-component-card:hover { border-color: #475569; }
+.sm-component-card.sm-component-used { border-color: #0891b2; }
 
-.sm-entry-field-bool {
+.sm-component-card-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: #e2e8f0;
+  padding: 8px 10px;
+  flex-wrap: wrap;
 }
-.sm-entry-field-bool input { width: auto; }
+.sm-component-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  flex: 1;
+}
+
+.sm-component-badge-used {
+  font-size: 9px;
+  font-weight: 700;
+  color: #0891b2;
+  background: rgba(8, 145, 178, 0.15);
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.sm-component-badge-pattern {
+  font-size: 9px;
+  font-weight: 700;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.15);
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+
+.sm-component-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  padding: 4px;
+}
+
+.sm-component-preview {
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+  min-height: 40px;
+}
+
+.sm-component-iframe {
+  border: none;
+  width: 100%;
+  pointer-events: none;
+  display: block;
+}
+
+.sm-component-card-actions {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-top: 1px solid #334155;
+}
+
+.sm-component-btn {
+  background: none;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.sm-component-btn:hover { background: #334155; color: #e2e8f0; }
+.sm-component-btn:disabled { opacity: 0.35; cursor: default; }
+.sm-component-btn:disabled:hover { background: none; color: #94a3b8; }
+
+.sm-component-delete { border-color: transparent; margin-left: auto; }
+.sm-component-delete:hover { color: #ef4444; background: none; }
+
+.sm-component-editor-box { width: 500px; }
+.sm-component-editor-textarea {
+  width: 100%;
+  min-height: 260px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  resize: vertical;
+  line-height: 1.5;
+  tab-size: 2;
+}
+.sm-component-editor-textarea:focus { outline: none; border-color: #0891b2; }
 
 /* ── Media Grid ── */
 
