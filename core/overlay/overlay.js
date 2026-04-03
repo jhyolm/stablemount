@@ -519,21 +519,23 @@
 
   function scanPageImages() {
     const items = [];
+    const seen = new WeakSet();
+    const bgCandidates = 'img, [data-section], [data-partial], section, header, footer, [class*="hero"], [class*="banner"], [style*="background"]';
 
-    document.querySelectorAll('img').forEach(img => {
-      if (img.closest('[data-sm-overlay]')) return;
-      const src = img.getAttribute('src') || '';
-      if (!src) return;
-      items.push({ type: 'img', src, element: img, label: img.alt || img.closest('[data-section]')?.dataset.section || 'image' });
-    });
-
-    document.querySelectorAll('[data-section], [data-partial], section, header, footer, [class*="hero"], [class*="banner"]').forEach(el => {
-      if (el.closest('[data-sm-overlay]')) return;
-      const bg = getComputedStyle(el).backgroundImage;
-      if (!bg || bg === 'none' || !bg.includes('url(')) return;
-      const urlMatch = bg.match(/url\(["']?([^"')]+)["']?\)/);
-      const src = urlMatch ? urlMatch[1] : bg;
-      items.push({ type: 'bg', src, element: el, label: el.dataset.section || el.dataset.partial || el.tagName.toLowerCase() + ' background' });
+    document.querySelectorAll(bgCandidates).forEach(el => {
+      if (el.closest('[data-sm-overlay]') || seen.has(el)) return;
+      seen.add(el);
+      if (el.tagName === 'IMG') {
+        const src = el.getAttribute('src') || '';
+        if (!src) return;
+        items.push({ type: 'img', src, element: el, label: el.alt || el.closest('[data-section]')?.dataset.section || 'image' });
+      } else {
+        const bg = getComputedStyle(el).backgroundImage;
+        if (!bg || bg === 'none' || !bg.includes('url(')) return;
+        const urlMatch = bg.match(/url\(["']?([^"')]+)["']?\)/);
+        const src = urlMatch ? urlMatch[1] : bg;
+        items.push({ type: 'bg', src, element: el, label: el.dataset.section || el.dataset.partial || el.tagName.toLowerCase() + ' background' });
+      }
     });
 
     imageListEl.innerHTML = '';
