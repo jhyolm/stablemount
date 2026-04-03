@@ -926,7 +926,7 @@
       const previewEl = siteBody.querySelector(`[data-comp-preview="${p.id}"]`);
       if (!previewEl) continue;
       if (mountPreview) {
-        await mountPreview(previewEl, p.id, siteCSS);
+        await mountPreview(previewEl, p, siteCSS);
       }
     }
 

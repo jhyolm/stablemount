@@ -543,8 +543,11 @@ const server = createServer(async (req, res) => {
         if (existingPartials.some(e => e.name.toLowerCase() === c.name.toLowerCase())) continue;
         newPartials.push(createPartial({
           name: c.name, html: c.html,
+          mode: c.mode || 'global',
           weight: c.weight || 'rule',
           scope: c.scope || 'global',
+          isPattern: !!c.isPattern,
+          preview: c.preview,
         }));
       }
 
@@ -611,6 +614,7 @@ const server = createServer(async (req, res) => {
                   weight: a.weight || 'rule',
                   scope: a.scope || 'global',
                   isPattern: !!a.isPattern,
+                  preview: a.preview,
                 });
                 broadcast('partials');
                 actionResults.push({ action: 'createPartial', name: a.name });

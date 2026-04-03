@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractTokens, extractStructure, tokensToDecisions, structureToDescription } from './extract.js';
+import { extractTokens, extractStructure, collectImageNodes, tokensToDecisions, structureToDescription } from './extract.js';
 import { renderPanel } from './panel.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -58,11 +58,13 @@ export const routes = [
       }
 
       if (params.path === 'generate-prepare') {
-        return handleGeneratePrepare(body);
+        const cookie = req?.headers?.cookie || '';
+        return handleGeneratePrepare(body, cookie);
       }
 
       if (params.path === 'extract') {
-        return handleExtract(body);
+        const cookie = req?.headers?.cookie || '';
+        return handleExtract(body, cookie);
       }
 
       if (params.path === 'apply') {
@@ -100,7 +102,7 @@ export const overlay = {
 
 // ─── Route Handlers ─────────────────────────────────────────
 
-async function handleGeneratePrepare({ figmaUrl }) {
+async function handleGeneratePrepare({ figmaUrl }, cookie) {
   if (!figmaUrl || !figmaUrl.trim()) {
     return { status: 200, body: { context: '' } };
   }
@@ -127,7 +129,13 @@ async function handleGeneratePrepare({ figmaUrl }) {
     const structure = extractStructure(figmaData, nodeId);
     const decisions = tokensToDecisions(tokens);
     const structureDesc = structureToDescription(structure);
-    const context = buildFigmaPrompt(tokens, structureDesc, decisions, 'create');
+
+    let imageMap = {};
+    try {
+      imageMap = await extractAndSaveImages(fileKey, figmaData, nodeId, settings.figmaToken, cookie);
+    } catch {}
+
+    const context = buildFigmaPrompt(tokens, structureDesc, decisions, 'create', null, imageMap);
 
     return { status: 200, body: { context } };
   } catch {
@@ -135,7 +143,7 @@ async function handleGeneratePrepare({ figmaUrl }) {
   }
 }
 
-async function handleExtract({ figmaUrl }) {
+async function handleExtract({ figmaUrl }, cookie) {
   const settings = readSettings();
   const figmaToken = settings.figmaToken;
   if (!figmaToken) {
@@ -172,18 +180,25 @@ async function handleExtract({ figmaUrl }) {
   const decisions = tokensToDecisions(tokens);
   const structureDescription = structureToDescription(structure);
 
+  let imageMap = {};
+  try {
+    imageMap = await extractAndSaveImages(fileKey, figmaData, nodeId, figmaToken, cookie);
+  } catch (err) {
+    console.warn('[figma] Image extraction failed (non-fatal):', err.message);
+  }
+
   return {
     status: 200,
-    body: { tokens, structure, decisions, structureDescription },
+    body: { tokens, structure, decisions, structureDescription, imageMap },
   };
 }
 
-async function handleApply({ tokens, structure, decisions, page, mode, newPage }, cookie) {
+async function handleApply({ tokens, structure, decisions, page, mode, newPage, imageMap }, cookie) {
   const base = `http://localhost:${process.env.PORT || 3000}`;
   const authHeaders = cookie ? { Cookie: cookie } : {};
 
   if (mode === 'create' && newPage) {
-    const intent = buildFigmaPrompt(tokens, structure, decisions, mode, newPage.intent);
+    const intent = buildFigmaPrompt(tokens, structure, decisions, mode, newPage.intent, imageMap);
 
     try {
       const res = await fetch(`${base}/api/generate`, {
@@ -203,7 +218,7 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
     }
   }
 
-  const figmaContext = buildFigmaPrompt(tokens, structure, decisions, mode);
+  const figmaContext = buildFigmaPrompt(tokens, structure, decisions, mode, null, imageMap);
 
   const chatPayload = {
     message: figmaContext,
@@ -231,6 +246,91 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
   }
 }
 
+// ─── Figma Image Extraction ─────────────────────────────────
+
+async function fetchFigmaImageURLs(fileKey, nodeIds, figmaToken, format = 'png') {
+  if (!nodeIds.length) return {};
+  const ids = nodeIds.join(',');
+  const scale = format === 'svg' ? '' : '&scale=2';
+  const url = `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(ids)}&format=${format}${scale}`;
+  try {
+    const res = await fetch(url, { headers: { 'X-Figma-Token': figmaToken } });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.images || {};
+  } catch { return {}; }
+}
+
+async function downloadAndSaveImage(imageUrl, filename, cookie, baseUrl) {
+  try {
+    const res = await fetch(imageUrl);
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const ext = filename.endsWith('.svg') ? 'svg' : 'png';
+    const mimeType = ext === 'svg' ? 'image/svg+xml' : 'image/png';
+
+    const boundary = '----FigmaUpload' + Date.now();
+    const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`;
+    const footer = `\r\n--${boundary}--\r\n`;
+    const body = Buffer.concat([Buffer.from(header), buffer, Buffer.from(footer)]);
+
+    const uploadRes = await fetch(`${baseUrl}/api/media`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body,
+    });
+    if (!uploadRes.ok) return null;
+    const result = await uploadRes.json();
+    return result.path || null;
+  } catch { return null; }
+}
+
+function slugifyFilename(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+}
+
+async function extractAndSaveImages(fileKey, figmaData, nodeId, figmaToken, cookie) {
+  const base = `http://localhost:${process.env.PORT || 3000}`;
+  const imageNodes = collectImageNodes(figmaData, nodeId);
+  const imageMap = {};
+
+  const rasterIds = imageNodes.raster.map(n => n.id);
+  const vectorIds = imageNodes.vector.map(n => n.id);
+
+  const [rasterURLs, vectorURLs] = await Promise.all([
+    fetchFigmaImageURLs(fileKey, rasterIds, figmaToken, 'png'),
+    fetchFigmaImageURLs(fileKey, vectorIds, figmaToken, 'svg'),
+  ]);
+
+  const downloads = [];
+  for (const node of imageNodes.raster) {
+    const url = rasterURLs[node.id];
+    if (!url) continue;
+    const filename = `figma-${slugifyFilename(node.name)}.png`;
+    downloads.push(
+      downloadAndSaveImage(url, filename, cookie, base).then(path => {
+        if (path) imageMap[node.name] = path;
+      })
+    );
+  }
+  for (const node of imageNodes.vector) {
+    const url = vectorURLs[node.id];
+    if (!url) continue;
+    const filename = `figma-${slugifyFilename(node.name)}.svg`;
+    downloads.push(
+      downloadAndSaveImage(url, filename, cookie, base).then(path => {
+        if (path) imageMap[node.name] = path;
+      })
+    );
+  }
+
+  await Promise.all(downloads);
+  return imageMap;
+}
+
 // ─── Figma URL Parsing ──────────────────────────────────────
 
 function parseFigmaUrl(url) {
@@ -249,7 +349,7 @@ function parseFigmaUrl(url) {
 
 // ─── AI Prompt Construction ─────────────────────────────────
 
-function buildFigmaPrompt(tokens, structureDesc, decisions, mode, additionalIntent) {
+function buildFigmaPrompt(tokens, structureDesc, decisions, mode, additionalIntent, imageMap) {
   let prompt = `FIGMA DESIGN IMPORT\n\n`;
 
   prompt += `This content is being imported from a Figma design file. IMPORTANT INSTRUCTIONS:\n`;
@@ -289,6 +389,14 @@ function buildFigmaPrompt(tokens, structureDesc, decisions, mode, additionalInte
     prompt += `FIGMA LAYOUT STRUCTURE:\n`;
     prompt += `The following is a tree describing the Figma frames, components, and text layers. Interpret this as sections and content for the page. Items marked [COMPONENT] are reusable elements in Figma — check if a matching partial exists before creating new ones.\n\n`;
     prompt += structureDesc + '\n\n';
+  }
+
+  if (imageMap && Object.keys(imageMap).length) {
+    prompt += `EXTRACTED IMAGES FROM FIGMA (saved to site media — use these exact paths):\n`;
+    for (const [name, path] of Object.entries(imageMap)) {
+      prompt += `  "${name}" → ${path}\n`;
+    }
+    prompt += `Use these local image paths in <img src="..."> or background-image CSS. Match the Figma layer name to determine where each image belongs in the layout.\n\n`;
   }
 
   if (mode === 'create') {

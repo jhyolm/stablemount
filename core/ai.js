@@ -105,8 +105,11 @@ PAGE: A standalone URL route. Full HTML document (<!DOCTYPE> through </html>).
   /about, /contact, /pricing — each is a page. The unit of navigation.
 
 PARTIAL: A reusable HTML component. NOT a page. NOT a URL.
-  header, footer, hero-card, pricing-table — injected into pages via <!-- @partial:name -->.
-  A partial is HTML + scoped CSS + optional JS, bundled together.
+  Injected into pages via <!-- @partial:name -->. HTML + scoped CSS + optional JS, bundled together.
+  Two modes:
+    - Global (mode: "global"): Same content everywhere. Header, footer, nav. Content is baked into the partial.
+    - Injectable (mode: "injectable"): A template that receives data from its usage context via data-* attributes on the parent element.
+      Example: a card partial reads data-card-title, data-card-image from its wrapping element. The page provides the data, the partial renders it.
 
 DECISION: A site-wide design constraint. Two kinds:
   - Token (kind: "token"): A CSS custom property. The server injects these automatically at browse time as :root variables.
@@ -259,9 +262,11 @@ RULES FOR PARTIALS:
 ${arch.hasPartials
   ? '- Partials already exist. Use <!-- @partial:name --> directives for them. Only propose NEW partials if you created a distinct reusable pattern.'
   : '- No partials exist yet. You MUST create a header and footer as partials. The page HTML should use <!-- @partial:header --> and <!-- @partial:footer --> directives for them.'}
-- Each partial: { "name": "lowercase-kebab", "html": "<bundled partial>", "mode": "global|injectable" }
+- Each partial: { "name": "lowercase-kebab", "html": "<bundled partial>", "mode": "global|injectable", "preview": { "width": "350px", "data": {...} } }
 - Partials are reusable HTML/CSS/JS bundles injected server-side via <!-- @partial:name --> directives.
-- Global partials: same content everywhere (header, footer). Injectable partials: accept slot data per page (e.g. accordion with page-specific FAQ).
+- Global partials (mode "global"): same content everywhere (header, footer). Content is baked into the HTML.
+- Injectable partials (mode "injectable"): templates that read data-* attributes from their parent element. The page provides data, the partial renders it.
+  For injectable partials, include a "preview" field with "width" and "data" (sample data-* key/value pairs for standalone preview).
 - The page HTML must NEVER contain partial markup inline — only the directive comment. The server injects the partial content at browse time.
 - BUNDLED FORMAT: Each partial's "html" field must be a self-contained bundle in this exact order:
   1. The HTML markup FIRST
@@ -444,7 +449,10 @@ AVAILABLE ACTIONS:
 - createCollection: { name, slug, schema: [{name, type, required}] } — types: text, richtext, number, date, image, url, boolean
 - createEntry: { collection (slug), slug, data: {field: value} }
 - createPage: { title, slug, intent } — AI generates the page HTML from the intent
-- createPartial: { name, html, mode, isPattern } — creates a reusable component (partial or pattern)
+- createPartial: { name, html, mode, isPattern, preview? } — creates a reusable component
+    mode: "global" (baked content: header, footer) or "injectable" (data-driven template: cards, tiles)
+    preview: required for injectable/pattern partials. { width: "350px", data: { "cardTitle": "Sample", "cardImage": "https://loremflickr.com/600/400/keyword" } }
+    preview.data keys become data-* attributes on a wrapper element so the partial's JS can read them in preview.
 - deletePage: { slug }
 - deletePartial: { name }
 - deleteCollection: { slug }

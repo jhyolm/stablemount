@@ -299,7 +299,9 @@ export function renderPanel() {
 
         extractedData = data;
         renderResults(data);
-        setImportStatus('Extracted ' + data.tokens.colors.length + ' colors, ' + data.tokens.fonts.length + ' fonts, ' + data.structure.length + ' sections.', 'success');
+        const imgCount = data.imageMap ? Object.keys(data.imageMap).length : 0;
+        const imgMsg = imgCount ? ', ' + imgCount + ' images' : '';
+        setImportStatus('Extracted ' + data.tokens.colors.length + ' colors, ' + data.tokens.fonts.length + ' fonts, ' + data.structure.length + ' sections' + imgMsg + '.', 'success');
         applyBtn.disabled = false;
       } catch (err) {
         setImportStatus('Error: ' + err.message, 'error');
@@ -324,6 +326,7 @@ export function renderPanel() {
         tokens: extractedData.tokens,
         structure: extractedData.structureDescription,
         decisions: extractedData.decisions,
+        imageMap: extractedData.imageMap || {},
         mode: modeSelect.value,
       };
 
@@ -366,6 +369,14 @@ export function renderPanel() {
         const li = document.createElement('li');
         li.textContent = f.family + ' ' + f.weight + ' ' + f.size + 'px';
         tokenList.appendChild(li);
+      }
+      if (data.imageMap && Object.keys(data.imageMap).length) {
+        for (const [name, path] of Object.entries(data.imageMap)) {
+          const li = document.createElement('li');
+          const isSvg = path.endsWith('.svg');
+          li.innerHTML = (isSvg ? '◇ ' : '▣ ') + '<strong>' + name + '</strong> <span style="color:#64748b">→ ' + path + '</span>';
+          tokenList.appendChild(li);
+        }
       }
       structureTree.textContent = data.structureDescription || '(no structure extracted)';
     }

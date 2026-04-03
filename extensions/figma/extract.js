@@ -338,6 +338,39 @@ function rgbToHex(r, g, b) {
   return '#' + toHex(r) + toHex(g) + toHex(b);
 }
 
+const MAX_IMAGE_NODES = 20;
+
+export function collectImageNodes(figmaData, nodeId) {
+  let target = nodeId ? findNode(figmaData.document, nodeId) : figmaData.document;
+  if (!target) target = figmaData.document;
+  if (!target) return { raster: [], vector: [] };
+
+  const raster = [];
+  const vector = [];
+
+  function walk(node) {
+    if (raster.length + vector.length >= MAX_IMAGE_NODES) return;
+
+    if (node.fills?.some(f => f.type === 'IMAGE' && f.visible !== false)) {
+      raster.push({ id: node.id, name: node.name });
+    } else if (['VECTOR', 'BOOLEAN_OPERATION', 'STAR', 'LINE', 'ELLIPSE', 'REGULAR_POLYGON'].includes(node.type)) {
+      vector.push({ id: node.id, name: node.name });
+    }
+
+    if (node.children) {
+      for (const child of node.children) {
+        if (raster.length + vector.length >= MAX_IMAGE_NODES) break;
+        walk(child);
+      }
+    }
+  }
+
+  const topNodes = target.children || [target];
+  for (const node of topNodes) walk(node);
+
+  return { raster, vector };
+}
+
 export function tokensToDecisions(tokens) {
   const decisions = [];
 

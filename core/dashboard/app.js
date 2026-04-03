@@ -617,17 +617,13 @@ function renderPartials() {
   h += '</div>';
 
   setTimeout(async () => {
-    const siteCSS = await getSiteCSS();
+    const UI = window.__SM_UI__ || {};
+    if (!UI.mountComponentPreview) return;
+    const siteCSS = await UI.fetchSiteCSS();
     for (const p of list) {
       const container = document.getElementById(`comp-preview-${p.id}`);
       if (!container) continue;
-      const iframe = document.createElement('iframe');
-      iframe.className = 'component-preview-frame';
-      iframe.sandbox = 'allow-same-origin';
-      container.appendChild(iframe);
-      fetch(`/api/partials/${p.id}/html`).then(r => r.ok ? r.text() : '').then(html => {
-        iframe.srcdoc = `<!DOCTYPE html><html><head>${siteCSS}<style>body{margin:0;overflow:hidden;transform:scale(0.5);transform-origin:top left;width:200%;}</style></head><body>${html}</body></html>`;
-      }).catch(() => {});
+      await UI.mountComponentPreview(container, p, siteCSS);
     }
   }, 0);
 

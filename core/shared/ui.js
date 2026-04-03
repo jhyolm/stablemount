@@ -9,6 +9,135 @@ export function esc(s) {
   return d.innerHTML;
 }
 
+// ── Preview Preparation ──
+
+function detectPreviewWidth(partial) {
+  if (partial.isPattern || partial.mode === 'injectable') return '350px';
+  if (partial.mode === 'global') return '100%';
+  return '600px';
+}
+
+function generatePlaceholderText(hint) {
+  const h = (hint || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (!h) return 'Sample content';
+  return h.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function autoFillHTML(html, partialName) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  doc.querySelectorAll('img').forEach(img => {
+    if (!img.getAttribute('src')) {
+      const alt = img.getAttribute('alt') || partialName || 'placeholder';
+      const kw = alt.toLowerCase().replace(/[^a-z0-9]+/g, ',').replace(/^,|,$/g, '').split(',').slice(0, 2).join(',') || 'abstract';
+      img.setAttribute('src', `https://loremflickr.com/600/400/${kw}`);
+      if (!img.getAttribute('alt')) img.setAttribute('alt', generatePlaceholderText(partialName));
+    }
+  });
+
+  doc.querySelectorAll('[style]').forEach(el => {
+    const bg = el.style.backgroundImage;
+    if (bg && (bg === 'url("")' || bg === 'url()' || bg === 'none')) {
+      const kw = partialName ? partialName.replace(/[^a-z0-9]+/g, ',') : 'abstract';
+      el.style.backgroundImage = `url(https://loremflickr.com/800/600/${kw})`;
+    }
+  });
+
+  const textTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'a', 'li', 'td', 'th', 'label', 'figcaption', 'blockquote'];
+  doc.querySelectorAll(textTags.join(',')).forEach(el => {
+    if (el.children.length === 0 && !el.textContent.trim()) {
+      const hint = el.getAttribute('data-content') || el.className || el.tagName.toLowerCase();
+      el.textContent = generatePlaceholderText(hint);
+    }
+  });
+
+  let result = doc.body.innerHTML;
+  result = result.replace(/\{\{(\w+)\}\}/g, (_, name) => generatePlaceholderText(name));
+  return result;
+}
+
+function buildDataAttrs(data) {
+  if (!data || typeof data !== 'object') return '';
+  return Object.entries(data).map(([k, v]) => ` data-${esc(k)}="${esc(v)}"`).join('');
+}
+
+function extractJSDataKeys(html) {
+  const keys = new Set();
+  const patterns = [
+    /\.dataset\.(\w+)/g,
+    /data-(\w[\w-]*)/g,
+  ];
+  const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/i);
+  if (scriptMatch) {
+    const js = scriptMatch[1];
+    for (const rx of patterns) {
+      let m;
+      while ((m = rx.exec(js)) !== null) {
+        const key = m[1];
+        if (!['smOverlay', 'partial', 'section', 'content', 'eachEntry', 'compPreview', 'compName', 'compId', 'decId', 'field', 'variable'].includes(key)) {
+          keys.add(key);
+        }
+      }
+    }
+  }
+  return keys;
+}
+
+function generateSampleDataForKeys(keys, partialName) {
+  const data = {};
+  for (const key of keys) {
+    const lower = key.toLowerCase();
+    if (lower.includes('image') || lower.includes('img') || lower.includes('photo') || lower.includes('src')) {
+      const kw = partialName ? partialName.replace(/[^a-z0-9]+/g, ',') : 'abstract';
+      data[key] = `https://loremflickr.com/600/400/${kw}`;
+    } else if (lower.includes('href') || lower.includes('url') || lower.includes('link')) {
+      data[key] = '#';
+    } else {
+      data[key] = generatePlaceholderText(key.replace(/([A-Z])/g, ' $1'));
+    }
+  }
+  return data;
+}
+
+export function preparePreviewHTML(rawHTML, partial, siteCSS) {
+  const preview = partial.preview || {};
+  const width = preview.width || detectPreviewWidth(partial);
+  const explicitData = preview.data || {};
+
+  let autoData = {};
+  const jsKeys = extractJSDataKeys(rawHTML);
+  if (jsKeys.size) {
+    autoData = generateSampleDataForKeys(jsKeys, partial.name);
+  }
+
+  const mergedData = { ...autoData, ...explicitData };
+  const dataAttrs = buildDataAttrs(mergedData);
+
+  let bodyHTML = rawHTML;
+  let partialCSS = '';
+  let partialJS = '';
+  const styleRx = /<style>([\s\S]*?)<\/style>/gi;
+  const scriptRx = /<script>([\s\S]*?)<\/script>/gi;
+  for (const m of rawHTML.matchAll(styleRx)) { partialCSS += m[1]; bodyHTML = bodyHTML.replace(m[0], ''); }
+  for (const m of rawHTML.matchAll(scriptRx)) { partialJS += m[1]; bodyHTML = bodyHTML.replace(m[0], ''); }
+
+  const needsAutoFill = partial.isPattern || partial.mode === 'injectable' || Object.keys(explicitData).length > 0;
+  if (needsAutoFill) {
+    bodyHTML = autoFillHTML(bodyHTML, partial.name);
+  }
+
+  const wrapStyle = width === '100%' ? '' : `max-width:${width};margin:0 auto;`;
+
+  return '<!DOCTYPE html><html><head>' + siteCSS +
+    '<style>body{margin:0;background:#fff;padding:' + (width === '100%' ? '0' : '16px') + ';}' +
+    partialCSS + '</style></head><body>' +
+    '<div class="preview-wrap" style="' + wrapStyle + '"' + dataAttrs + '>' +
+    bodyHTML.trim() + '</div>' +
+    (partialJS ? '<script>' + partialJS + '<\/script>' : '') +
+    '</body></html>';
+}
+
 // ── Component Preview ──
 
 export async function fetchSiteCSS(pages) {
@@ -52,7 +181,9 @@ export function renderComponentCard(partial, opts = {}) {
   </div>`;
 }
 
-export async function mountComponentPreview(container, partialId, siteCSS) {
+export async function mountComponentPreview(container, partial, siteCSS) {
+  const partialId = typeof partial === 'string' ? partial : partial?.id;
+  const partialMeta = typeof partial === 'object' ? partial : { id: partialId, name: '', mode: 'global', isPattern: false };
   try {
     const res = await fetch(`/api/partials/${partialId}/html`);
     if (!res.ok) return;
@@ -63,12 +194,12 @@ export async function mountComponentPreview(container, partialId, siteCSS) {
     }
     const iframe = document.createElement('iframe');
     iframe.className = 'sm-comp-iframe';
-    iframe.sandbox = 'allow-same-origin';
+    iframe.sandbox = 'allow-same-origin allow-scripts';
     container.innerHTML = '';
     container.appendChild(iframe);
     const doc = iframe.contentDocument;
     doc.open();
-    doc.write(`<!DOCTYPE html><html><head>${siteCSS}<style>body{margin:0;overflow:hidden;background:#fff;}</style></head><body>${html}</body></html>`);
+    doc.write(preparePreviewHTML(html, partialMeta, siteCSS));
     doc.close();
     requestAnimationFrame(() => {
       const bodyW = doc.body.scrollWidth || 1;
@@ -164,7 +295,7 @@ export async function openComponentEditor({ partial, onSave, onClose }) {
         <div class="sm-editor-right">
           <div class="sm-editor-preview-header"><label>Preview</label></div>
           <div class="sm-editor-preview-wrap">
-            <iframe class="sm-editor-preview" sandbox="allow-same-origin"></iframe>
+            <iframe class="sm-editor-preview" sandbox="allow-same-origin allow-scripts"></iframe>
           </div>
         </div>
       </div>
@@ -175,17 +306,17 @@ export async function openComponentEditor({ partial, onSave, onClose }) {
   const textarea = backdrop.querySelector('.sm-editor-textarea');
   const previewFrame = backdrop.querySelector('.sm-editor-preview');
 
+  function getCurrentMeta() {
+    return {
+      name: backdrop.querySelector('[name="name"]')?.value || existing.name || '',
+      mode: backdrop.querySelector('[name="mode"]')?.value || existing.mode || 'global',
+      isPattern: (backdrop.querySelector('[name="isPattern"]')?.value === 'true') || existing.isPattern || false,
+      preview: existing.preview,
+    };
+  }
+
   function renderPreview(content) {
-    let markup = content;
-    let partialCSS = '';
-    let partialJS = '';
-    const styleRx = /<style>([\s\S]*?)<\/style>/gi;
-    const scriptRx = /<script>([\s\S]*?)<\/script>/gi;
-    for (const m of content.matchAll(styleRx)) { partialCSS += m[1]; markup = markup.replace(m[0], ''); }
-    for (const m of content.matchAll(scriptRx)) { partialJS += m[1]; markup = markup.replace(m[0], ''); }
-    previewFrame.srcdoc = '<!DOCTYPE html><html><head>' + siteCSS +
-      '<style>body{margin:0;background:#fff;}' + partialCSS + '</style></head><body>' +
-      markup.trim() + (partialJS ? '<script>' + partialJS + '<\/script>' : '') + '</body></html>';
+    previewFrame.srcdoc = preparePreviewHTML(content, getCurrentMeta(), siteCSS);
   }
 
   if (html) renderPreview(html);

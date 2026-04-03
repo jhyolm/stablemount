@@ -376,7 +376,7 @@ export function savePartialHTMLByName(name, html) {
   }
 }
 
-export function createPartial({ name, html, mode = 'global', weight = 'rule', scope = 'global', isPattern = false }) {
+export function createPartial({ name, html, mode = 'global', weight = 'rule', scope = 'global', isPattern = false, preview }) {
   const partials = listPartials();
   const p = {
     id: genId(), name, mode, weight, scope, isPattern: !!isPattern,
@@ -384,6 +384,7 @@ export function createPartial({ name, html, mode = 'global', weight = 'rule', sc
     created: new Date().toISOString(),
     updated: new Date().toISOString(),
   };
+  if (preview && typeof preview === 'object') p.preview = preview;
   partials.push(p);
   writeJSON(PATHS.partials, partials);
   writeFileAtomic(join(PATHS.partialsDir, `${partialSlug(name)}.html`), html || '');
