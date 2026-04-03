@@ -23,7 +23,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
   ensureDirs, safePath,
   getSite, updateSite,
-  hasPassword, setPassword, verifyPassword, createSession, validateSession, destroySession,
+  hasUsers, listUsers, getUser, createUser, updateUser, deleteUser,
+  changePassword, verifyUserPassword, migrateAuth,
+  createSession, getSessionUser, validateSession, destroySession,
   saveSnapshot, listSnapshots, getSnapshot, restoreSnapshot,
   listDecisions, createDecision, updateDecision, deleteDecision, saveDecisions,
   listPartials, getPartialHTML, createPartial, updatePartial, deletePartial,
@@ -142,11 +144,23 @@ const ALLOWED_UPLOAD_TYPES = new Set([
   '.mp4', '.webm', '.mp3', '.ogg', '.wav', '.woff', '.woff2', '.ttf', '.otf',
 ]);
 
-function isAuthenticated(req) {
-  if (!hasPassword()) return true;
+function getRequestUser(req) {
+  if (!hasUsers()) return null;
   const cookies = parseCookies(req);
-  return validateSession(cookies.sm_session);
+  return getSessionUser(cookies.sm_session);
 }
+
+function isAuthenticated(req) {
+  if (!hasUsers()) return true;
+  return !!getRequestUser(req);
+}
+
+function requireAdmin(req) {
+  const user = getRequestUser(req);
+  return user && user.role === 'admin';
+}
+
+migrateAuth();
 
 // Load developer extensions at startup, hot-reload on file changes
 let extensions = { routes: new Map(), middleware: [], hooks: { onRequest: [], onPageRender: [], onPageSave: [], onContentChange: [], onAIResponse: [] }, manifests: [] };
@@ -191,23 +205,30 @@ const server = createServer(async (req, res) => {
       return serveFile(res, join(__dirname, 'core', 'auth', 'login.html'));
     }
     if (path === '/api/auth/status' && method === 'GET') {
-      return send(res, 200, { setup: hasPassword(), authenticated: isAuthenticated(req) });
+      const user = getRequestUser(req);
+      return send(res, 200, {
+        setup: hasUsers(),
+        authenticated: hasUsers() ? !!user : true,
+        user: user || null,
+      });
     }
     if (path === '/api/auth/setup' && method === 'POST') {
-      if (hasPassword()) return send(res, 400, { error: 'Password already set' });
-      const { password } = await jsonBody(req);
+      if (hasUsers()) return send(res, 400, { error: 'Setup already complete' });
+      const { username, password } = await jsonBody(req);
+      if (!username || username.length < 2) return send(res, 400, { error: 'Username must be at least 2 characters' });
       if (!password || password.length < 6) return send(res, 400, { error: 'Password must be at least 6 characters' });
-      setPassword(password);
-      const token = createSession();
+      const user = createUser({ username, displayName: username, password, role: 'admin' });
+      const token = createSession(user.id);
       setSessionCookie(res, token, req);
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, user });
     }
     if (path === '/api/auth/login' && method === 'POST') {
-      const { password } = await jsonBody(req);
-      if (!verifyPassword(password)) return send(res, 401, { error: 'Invalid password' });
-      const token = createSession();
+      const { username, password } = await jsonBody(req);
+      const user = verifyUserPassword(username, password);
+      if (!user) return send(res, 401, { error: 'Invalid username or password' });
+      const token = createSession(user.id);
       setSessionCookie(res, token, req);
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, user });
     }
     if (path === '/api/auth/logout' && method === 'POST') {
       const cookies = parseCookies(req);
@@ -215,12 +236,75 @@ const server = createServer(async (req, res) => {
       clearSessionCookie(res, req);
       return send(res, 200, { ok: true });
     }
+    if (path === '/api/auth/me' && method === 'GET') {
+      const user = getRequestUser(req);
+      if (!user) return send(res, 401, { error: 'Not authenticated' });
+      return send(res, 200, user);
+    }
+    if (path === '/api/auth/password' && method === 'PUT') {
+      const user = getRequestUser(req);
+      if (!user) return send(res, 401, { error: 'Not authenticated' });
+      const { current, password } = await jsonBody(req);
+      if (!verifyUserPassword(user.username, current)) return send(res, 400, { error: 'Current password is incorrect' });
+      if (!password || password.length < 6) return send(res, 400, { error: 'New password must be at least 6 characters' });
+      changePassword(user.id, password);
+      return send(res, 200, { ok: true });
+    }
 
     // ── Auth guard ──
-    if (hasPassword() && !isAuthenticated(req)) {
+    if (hasUsers() && !isAuthenticated(req)) {
       if (path.startsWith('/api/')) return send(res, 401, { error: 'Unauthorized' });
       res.writeHead(302, { Location: '/login' });
       return res.end();
+    }
+
+    // ── User management (admin only) ──
+    if (path === '/api/users' && method === 'GET') {
+      if (!requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+      const users = listUsers().map(({ passwordHash, passwordSalt, ...u }) => u);
+      return send(res, 200, users);
+    }
+    if (path === '/api/users' && method === 'POST') {
+      if (!requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+      const { username, displayName, password, role } = await jsonBody(req);
+      if (!username || username.length < 2) return send(res, 400, { error: 'Username must be at least 2 characters' });
+      if (!password || password.length < 6) return send(res, 400, { error: 'Password must be at least 6 characters' });
+      if (role && !['admin', 'editor'].includes(role)) return send(res, 400, { error: 'Role must be admin or editor' });
+      try {
+        const user = createUser({ username, displayName, password, role: role || 'editor' });
+        return send(res, 201, user);
+      } catch (err) {
+        return send(res, 400, { error: err.message });
+      }
+    }
+    {
+      const um = path.match(/^\/api\/users\/([^/]+)$/);
+      if (um && method === 'PUT') {
+        const reqUser = getRequestUser(req);
+        const targetId = um[1];
+        const isSelf = reqUser && reqUser.id === targetId;
+        if (!isSelf && !requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+        const updates = await jsonBody(req);
+        if (!isSelf) {
+          if (updates.role && !['admin', 'editor'].includes(updates.role)) return send(res, 400, { error: 'Role must be admin or editor' });
+        } else {
+          delete updates.role;
+        }
+        try {
+          const user = updateUser(targetId, updates);
+          if (!user) return send(res, 404, { error: 'User not found' });
+          return send(res, 200, user);
+        } catch (err) {
+          return send(res, 400, { error: err.message });
+        }
+      }
+      if (um && method === 'DELETE') {
+        if (!requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+        const reqUser = getRequestUser(req);
+        if (reqUser && reqUser.id === um[1]) return send(res, 400, { error: 'Cannot delete yourself' });
+        deleteUser(um[1]);
+        return send(res, 204, '');
+      }
     }
 
     // ── Livereload SSE ──

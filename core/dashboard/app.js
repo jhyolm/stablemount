@@ -5,6 +5,7 @@ const state = {
   partials: [],
   collections: [],
   site: {},
+  user: null,
   decisionFilter: 'all',
   decisionSearch: '',
   activeCollection: null,
@@ -33,7 +34,7 @@ async function api(method, path, body) {
 async function load() {
   const el = document.getElementById('content');
   try {
-    [state.site, state.pages, state.decisions, state.partials, state.collections, state.media, state.extensionManifests] = await Promise.all([
+    [state.site, state.pages, state.decisions, state.partials, state.collections, state.media, state.extensionManifests, state.user] = await Promise.all([
       api('GET', '/site'),
       api('GET', '/pages'),
       api('GET', '/decisions'),
@@ -41,7 +42,9 @@ async function load() {
       api('GET', '/collections'),
       api('GET', '/media').catch(() => []),
       api('GET', '/extensions/manifest').catch(() => []),
+      fetch('/api/auth/me').then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
+    renderUserBadge();
     render();
   } catch (err) {
     el.innerHTML = `<div class="empty-state" role="alert">
@@ -133,6 +136,7 @@ function render() {
     case 'decisions': el.innerHTML = renderDecisions(); break;
     case 'partials': el.innerHTML = renderPartials(); break;
     case 'media': el.innerHTML = renderMedia(); break;
+    case 'settings': el.innerHTML = renderSettings(); initSettings(); break;
     case 'extension': renderExtensionPanel(el); break;
   }
 }
@@ -1259,6 +1263,202 @@ function hideLoading() {
 
   loadHistory();
 })();
+
+// ── User Badge ──
+
+function renderUserBadge() {
+  const el = document.getElementById('sidebar-user');
+  if (!el) return;
+  if (!state.user) { el.innerHTML = ''; return; }
+  el.innerHTML = `<span class="user-badge"><strong>${esc(state.user.displayName)}</strong> <span class="tag tag-${state.user.role === 'admin' ? 'rule' : 'guide'}">${state.user.role}</span></span>`;
+}
+
+// ── Settings View ──
+
+function renderSettings() {
+  const isAdmin = state.user && state.user.role === 'admin';
+
+  let h = '<div class="view-header"><h1>Settings</h1></div>';
+
+  h += '<div class="settings-panels">';
+
+  h += `<div class="settings-panel">
+    <h2>Profile</h2>
+    <form id="profile-form">
+      <div class="form-group"><label>Display Name</label>
+        <input name="displayName" value="${esc(state.user?.displayName || '')}" required></div>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+    </form>
+  </div>`;
+
+  h += `<div class="settings-panel">
+    <h2>Change Password</h2>
+    <form id="password-form">
+      <div class="form-group"><label>Current Password</label>
+        <input type="password" name="current" required autocomplete="current-password"></div>
+      <div class="form-group"><label>New Password</label>
+        <input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirm New Password</label>
+        <input type="password" name="confirm" required autocomplete="new-password"></div>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">Change Password</button></div>
+    </form>
+  </div>`;
+
+  if (isAdmin) {
+    h += `<div class="settings-panel">
+      <h2>Users</h2>
+      <div class="view-header" style="margin-bottom:16px"><div></div>
+        <button class="btn btn-primary" onclick="showCreateUserModal()">+ Add User</button></div>
+      <div id="users-list"><p class="card-meta">Loading…</p></div>
+    </div>`;
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function initSettings() {
+  const profileForm = document.getElementById('profile-form');
+  if (profileForm) {
+    profileForm.onsubmit = async e => {
+      e.preventDefault();
+      const displayName = profileForm.displayName.value.trim();
+      if (!displayName) return;
+      try {
+        await api('PUT', '/users/' + state.user.id, { displayName });
+        state.user.displayName = displayName;
+        renderUserBadge();
+        showToast('Profile updated');
+      } catch (err) { alert(err.message); }
+    };
+  }
+
+  const pwForm = document.getElementById('password-form');
+  if (pwForm) {
+    pwForm.onsubmit = async e => {
+      e.preventDefault();
+      const current = pwForm.current.value;
+      const password = pwForm.password.value;
+      const confirm = pwForm.confirm.value;
+      if (password !== confirm) { alert('Passwords do not match'); return; }
+      if (password.length < 6) { alert('Password must be at least 6 characters'); return; }
+      try {
+        const res = await fetch('/api/auth/password', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Failed'); return; }
+        pwForm.reset();
+        showToast('Password changed');
+      } catch (err) { alert(err.message); }
+    };
+  }
+
+  if (state.user?.role === 'admin') loadUsersList();
+}
+
+async function loadUsersList() {
+  const el = document.getElementById('users-list');
+  if (!el) return;
+  try {
+    const users = await api('GET', '/users');
+    if (!users.length) { el.innerHTML = '<p class="empty-state">No users.</p>'; return; }
+    let h = `<table class="data-table"><thead><tr>
+      <th>Username</th><th>Display Name</th><th>Role</th><th>Last Login</th><th></th>
+    </tr></thead><tbody>`;
+    for (const u of users) {
+      const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : 'Never';
+      const isSelf = u.id === state.user?.id;
+      h += `<tr>
+        <td><strong>${esc(u.username)}</strong>${isSelf ? ' <span class="card-meta">(you)</span>' : ''}</td>
+        <td>${esc(u.displayName)}</td>
+        <td><span class="tag tag-${u.role === 'admin' ? 'rule' : 'guide'}">${u.role}</span></td>
+        <td class="card-meta">${lastLogin}</td>
+        <td style="text-align:right">
+          ${!isSelf ? `<button class="btn btn-sm" onclick="showEditUserModal('${u.id}','${esc(u.username)}','${esc(u.displayName)}','${u.role}')">Edit</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteUserAction('${u.id}','${esc(u.username)}')">Delete</button>` : ''}
+        </td>
+      </tr>`;
+    }
+    el.innerHTML = h + '</tbody></table>';
+  } catch (err) {
+    el.innerHTML = `<p class="card-meta" style="color:#dc2626">${esc(err.message)}</p>`;
+  }
+}
+
+window.showCreateUserModal = function() {
+  showModal(`<h2>Add User</h2>
+    <form id="create-user-form">
+      <div class="form-group"><label>Username</label>
+        <input name="username" required minlength="2" placeholder="e.g. sarah"></div>
+      <div class="form-group"><label>Display Name</label>
+        <input name="displayName" placeholder="e.g. Sarah Chen"></div>
+      <div class="form-group"><label>Password</label>
+        <input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
+      <div class="form-group"><label>Role</label>
+        <select name="role">
+          <option value="editor">Editor — can manage all content</option>
+          <option value="admin">Admin — full access including user management</option>
+        </select></div>
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create User</button>
+      </div>
+    </form>`);
+  document.getElementById('create-user-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('POST', '/users', {
+        username: f.username.value.trim(),
+        displayName: f.displayName.value.trim() || f.username.value.trim(),
+        password: f.password.value,
+        role: f.role.value,
+      });
+      hideModal();
+      loadUsersList();
+    } catch (err) { alert(err.message); }
+  };
+};
+
+window.showEditUserModal = function(id, username, displayName, role) {
+  showModal(`<h2>Edit User: ${esc(username)}</h2>
+    <form id="edit-user-form">
+      <div class="form-group"><label>Display Name</label>
+        <input name="displayName" value="${esc(displayName)}" required></div>
+      <div class="form-group"><label>Role</label>
+        <select name="role">
+          <option value="editor" ${role === 'editor' ? 'selected' : ''}>Editor</option>
+          <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+        </select></div>
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>`);
+  document.getElementById('edit-user-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('PUT', '/users/' + id, {
+        displayName: f.displayName.value.trim(),
+        role: f.role.value,
+      });
+      hideModal();
+      loadUsersList();
+    } catch (err) { alert(err.message); }
+  };
+};
+
+window.deleteUserAction = async function(id, username) {
+  if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', '/users/' + id);
+    loadUsersList();
+  } catch (err) { alert(err.message); }
+};
 
 // ── Logout ──
 

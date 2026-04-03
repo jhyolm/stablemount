@@ -92,9 +92,21 @@ body {
   padding: 16px 20px;
   border-top: 1px solid #1e293b;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
 }
+.sidebar-footer > .sidebar-row {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+}
+.sidebar-user {
+  width: 100%;
+}
+.user-badge {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #e2e8f0;
+}
+.user-badge strong { font-weight: 600; }
+.user-badge .tag { font-size: 10px; padding: 1px 6px; }
 
 .site-name {
   font-size: 13px;
@@ -872,4 +884,28 @@ body {
   padding: 6px 12px 10px;
   display: flex;
   gap: 6px;
+}
+
+/* ── Settings ── */
+
+.settings-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 700px;
+}
+
+.settings-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.settings-panel h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
 }

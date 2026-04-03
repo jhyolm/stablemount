@@ -19,6 +19,7 @@ export const PATHS = {
   chatsDir: join(CONTENT, 'chats'),
   functionsDir: join(CONTENT, 'functions'),
   historyDir: join(CONTENT, 'history'),
+  users: join(CONTENT, 'users.json'),
 };
 
 export function ensureDirs() {
@@ -75,47 +76,141 @@ export function updateSite(updates) {
   return site;
 }
 
-// ── Auth ──
+// ── Users & Auth ──
 
-export function hasPassword() {
-  const site = getSite();
-  return !!(site.passwordHash && site.passwordSalt);
-}
+const USERS_FILE = join(CONTENT, 'users.json');
 
-export function setPassword(plaintext) {
+function hashPassword(plaintext) {
   const salt = randomBytes(16).toString('hex');
   const hash = scryptSync(plaintext, salt, 64).toString('hex');
-  const site = getSite();
-  site.passwordHash = hash;
-  site.passwordSalt = salt;
-  writeJSON(PATHS.site, site);
+  return { passwordHash: hash, passwordSalt: salt };
 }
 
-export function verifyPassword(plaintext) {
+function verifyHash(plaintext, hash, salt) {
+  const derived = scryptSync(plaintext, salt, 64);
+  return timingSafeEqual(derived, Buffer.from(hash, 'hex'));
+}
+
+function sanitizeUser(user) {
+  const { passwordHash, passwordSalt, ...safe } = user;
+  return safe;
+}
+
+export function listUsers() {
+  return readJSON(USERS_FILE, []);
+}
+
+export function hasUsers() {
+  return listUsers().length > 0;
+}
+
+export function getUser(id) {
+  return listUsers().find(u => u.id === id) || null;
+}
+
+export function getUserByUsername(username) {
+  return listUsers().find(u => u.username === username) || null;
+}
+
+export function createUser({ username, displayName, password, role = 'editor' }) {
+  const users = listUsers();
+  if (users.find(u => u.username === username)) {
+    throw new Error('Username already exists');
+  }
+  const { passwordHash, passwordSalt } = hashPassword(password);
+  const user = {
+    id: genId(), username, displayName: displayName || username,
+    role, passwordHash, passwordSalt,
+    created: Date.now(), lastLogin: null,
+  };
+  users.push(user);
+  writeJSON(USERS_FILE, users);
+  return sanitizeUser(user);
+}
+
+export function updateUser(id, updates) {
+  const users = listUsers();
+  const idx = users.findIndex(u => u.id === id);
+  if (idx === -1) return null;
+  if (updates.username && updates.username !== users[idx].username) {
+    if (users.find(u => u.username === updates.username && u.id !== id)) {
+      throw new Error('Username already exists');
+    }
+  }
+  const allowed = ['username', 'displayName', 'role'];
+  for (const key of allowed) {
+    if (updates[key] !== undefined) users[idx][key] = updates[key];
+  }
+  writeJSON(USERS_FILE, users);
+  return sanitizeUser(users[idx]);
+}
+
+export function deleteUser(id) {
+  writeJSON(USERS_FILE, listUsers().filter(u => u.id !== id));
+}
+
+export function changePassword(id, newPassword) {
+  const users = listUsers();
+  const idx = users.findIndex(u => u.id === id);
+  if (idx === -1) return false;
+  const { passwordHash, passwordSalt } = hashPassword(newPassword);
+  users[idx].passwordHash = passwordHash;
+  users[idx].passwordSalt = passwordSalt;
+  writeJSON(USERS_FILE, users);
+  return true;
+}
+
+export function verifyUserPassword(username, plaintext) {
+  const user = getUserByUsername(username);
+  if (!user || !user.passwordHash || !user.passwordSalt) return null;
+  if (!verifyHash(plaintext, user.passwordHash, user.passwordSalt)) return null;
+  const users = listUsers();
+  const idx = users.findIndex(u => u.id === user.id);
+  if (idx >= 0) { users[idx].lastLogin = Date.now(); writeJSON(USERS_FILE, users); }
+  return sanitizeUser(user);
+}
+
+export function migrateAuth() {
+  if (existsSync(USERS_FILE) && listUsers().length > 0) return;
   const site = getSite();
-  if (!site.passwordHash || !site.passwordSalt) return false;
-  const hash = scryptSync(plaintext, site.passwordSalt, 64);
-  return timingSafeEqual(hash, Buffer.from(site.passwordHash, 'hex'));
+  if (site.passwordHash && site.passwordSalt) {
+    const user = {
+      id: genId(), username: 'admin', displayName: 'Admin',
+      role: 'admin',
+      passwordHash: site.passwordHash, passwordSalt: site.passwordSalt,
+      created: Date.now(), lastLogin: null,
+    };
+    writeJSON(USERS_FILE, [user]);
+    delete site.passwordHash;
+    delete site.passwordSalt;
+    writeJSON(PATHS.site, site);
+    console.log('Migrated to multi-user auth. Default username: admin');
+  }
 }
 
 const sessions = new Map();
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 
-export function createSession() {
+export function createSession(userId) {
   const token = randomBytes(32).toString('hex');
-  sessions.set(token, { created: Date.now() });
+  sessions.set(token, { userId, created: Date.now() });
   return token;
 }
 
-export function validateSession(token) {
-  if (!token) return false;
+export function getSessionUser(token) {
+  if (!token) return null;
   const session = sessions.get(token);
-  if (!session) return false;
+  if (!session) return null;
   if (Date.now() - session.created > SESSION_MAX_AGE) {
     sessions.delete(token);
-    return false;
+    return null;
   }
-  return true;
+  const user = getUser(session.userId);
+  return user ? sanitizeUser(user) : null;
+}
+
+export function validateSession(token) {
+  return !!getSessionUser(token);
 }
 
 export function destroySession(token) {

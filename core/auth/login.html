@@ -71,7 +71,6 @@
       margin-bottom: 16px;
       display: none;
     }
-    .confirm-group { margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -81,16 +80,20 @@
       <span class="logo-text">Stablemount</span>
     </div>
     <h1 id="heading">Log In</h1>
-    <p class="subtitle" id="subtitle">Enter your password to continue.</p>
+    <p class="subtitle" id="subtitle">Enter your credentials to continue.</p>
     <div class="error" id="error"></div>
     <form id="form">
       <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required autofocus>
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus autocomplete="username">
       </div>
-      <div class="confirm-group" id="confirm-group" style="display:none">
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+      </div>
+      <div class="form-group" id="confirm-group" style="display:none">
         <label for="confirm">Confirm Password</label>
-        <input type="password" id="confirm" name="confirm">
+        <input type="password" id="confirm" name="confirm" autocomplete="new-password">
       </div>
       <button type="submit" class="btn" id="submit-btn">Log In</button>
     </form>
@@ -102,6 +105,8 @@
     const subtitle = document.getElementById('subtitle');
     const confirmGroup = document.getElementById('confirm-group');
     const submitBtn = document.getElementById('submit-btn');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
     let isSetup = false;
 
     async function init() {
@@ -110,11 +115,12 @@
       if (data.authenticated) { location.href = '/dashboard'; return; }
       if (!data.setup) {
         isSetup = true;
-        heading.textContent = 'Set Up Password';
-        subtitle.textContent = 'Choose a password to protect your Stablemount instance.';
+        heading.textContent = 'Create Admin Account';
+        subtitle.textContent = 'Set up the first account to protect your Stablemount instance.';
         confirmGroup.style.display = 'block';
         document.getElementById('confirm').required = true;
-        submitBtn.textContent = 'Set Password';
+        passwordInput.autocomplete = 'new-password';
+        submitBtn.textContent = 'Create Account';
       }
     }
 
@@ -126,36 +132,38 @@
     form.addEventListener('submit', async e => {
       e.preventDefault();
       errorEl.style.display = 'none';
-      const password = document.getElementById('password').value;
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
 
       if (isSetup) {
         const confirm = document.getElementById('confirm').value;
-        if (password !== confirm) { showError('Passwords do not match.'); return; }
+        if (username.length < 2) { showError('Username must be at least 2 characters.'); return; }
         if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
+        if (password !== confirm) { showError('Passwords do not match.'); return; }
       }
 
       submitBtn.disabled = true;
-      submitBtn.textContent = isSetup ? 'Setting up…' : 'Logging in…';
+      submitBtn.textContent = isSetup ? 'Creating account…' : 'Logging in…';
 
       try {
         const endpoint = isSetup ? '/api/auth/setup' : '/api/auth/login';
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ username, password }),
         });
         if (!res.ok) {
           const data = await res.json();
           showError(data.error || 'Something went wrong.');
           submitBtn.disabled = false;
-          submitBtn.textContent = isSetup ? 'Set Password' : 'Log In';
+          submitBtn.textContent = isSetup ? 'Create Account' : 'Log In';
           return;
         }
         location.href = '/dashboard';
       } catch {
         showError('Connection failed.');
         submitBtn.disabled = false;
-        submitBtn.textContent = isSetup ? 'Set Password' : 'Log In';
+        submitBtn.textContent = isSetup ? 'Create Account' : 'Log In';
       }
     });
 
