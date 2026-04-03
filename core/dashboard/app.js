@@ -131,13 +131,14 @@ function render() {
   document.getElementById('site-name').textContent = state.site?.name || 'My Website';
   renderNav();
   const el = document.getElementById('content');
+  const banner = setupBannerHTML();
   switch (state.view) {
-    case 'pages': el.innerHTML = renderPages(); break;
-    case 'collections': el.innerHTML = state.activeCollection ? renderEntries() : renderCollections(); break;
-    case 'decisions': el.innerHTML = renderDecisions(); break;
-    case 'partials': el.innerHTML = renderPartials(); break;
-    case 'media': el.innerHTML = renderMedia(); break;
-    case 'settings': el.innerHTML = renderSettings(); initSettings(); break;
+    case 'pages': el.innerHTML = banner + renderPages(); break;
+    case 'collections': el.innerHTML = banner + (state.activeCollection ? renderEntries() : renderCollections()); break;
+    case 'decisions': el.innerHTML = banner + renderDecisions(); break;
+    case 'partials': el.innerHTML = banner + renderPartials(); break;
+    case 'media': el.innerHTML = banner + renderMedia(); break;
+    case 'settings': el.innerHTML = banner + renderSettings(); initSettings(); break;
     case 'extension': renderExtensionPanel(el); break;
   }
 }
@@ -1267,16 +1268,12 @@ function hideLoading() {
 
 // ── Setup Banner ──
 
-function renderSetupBanner() {
-  const existing = document.getElementById('setup-banner');
-  if (existing) existing.remove();
-  if (state.user) return;
-  const banner = document.createElement('div');
-  banner.id = 'setup-banner';
-  banner.className = 'setup-banner';
-  banner.innerHTML = `<strong>No account set up.</strong> Your dashboard is open to anyone on this network. <a href="/login">Create an admin account</a> to secure it.`;
-  document.querySelector('.content')?.prepend(banner);
+function setupBannerHTML() {
+  if (state.user) return '';
+  return `<div class="setup-banner"><strong>No account set up.</strong> Your dashboard is open to anyone on this network. <a href="/login">Create an admin account</a> to secure it.</div>`;
 }
+
+function renderSetupBanner() {}
 
 // ── User Badge ──
 
