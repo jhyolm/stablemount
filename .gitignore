@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.*
+
+# User-generated content (created at runtime)
+content/
+
+# Export output
+dist/
+
+# Temp files from atomic writes
+*.tmp.*
+
+# Internal docs (not part of the distributed project)
+CONCEPT.md
+architecture.md
+extensions.md
+
+.DS_Store

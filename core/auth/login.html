@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stablemount</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8f9fa;
+      color: #1a1a1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .login-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 40px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 32px;
+      justify-content: center;
+    }
+    .logo-mark { font-size: 18px; color: #6366f1; }
+    .logo-text { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+    h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: #6b7280; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #6366f1; }
+    .form-group { margin-bottom: 16px; }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #4f46e5; }
+    .btn:disabled { opacity: 0.6; cursor: default; }
+    .error {
+      background: #fef2f2;
+      color: #dc2626;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .confirm-group { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="logo">
+      <span class="logo-mark">&#9670;</span>
+      <span class="logo-text">Stablemount</span>
+    </div>
+    <h1 id="heading">Log In</h1>
+    <p class="subtitle" id="subtitle">Enter your password to continue.</p>
+    <div class="error" id="error"></div>
+    <form id="form">
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus>
+      </div>
+      <div class="confirm-group" id="confirm-group" style="display:none">
+        <label for="confirm">Confirm Password</label>
+        <input type="password" id="confirm" name="confirm">
+      </div>
+      <button type="submit" class="btn" id="submit-btn">Log In</button>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('form');
+    const errorEl = document.getElementById('error');
+    const heading = document.getElementById('heading');
+    const subtitle = document.getElementById('subtitle');
+    const confirmGroup = document.getElementById('confirm-group');
+    const submitBtn = document.getElementById('submit-btn');
+    let isSetup = false;
+
+    async function init() {
+      const res = await fetch('/api/auth/status');
+      const data = await res.json();
+      if (data.authenticated) { location.href = '/dashboard'; return; }
+      if (!data.setup) {
+        isSetup = true;
+        heading.textContent = 'Set Up Password';
+        subtitle.textContent = 'Choose a password to protect your Stablemount instance.';
+        confirmGroup.style.display = 'block';
+        document.getElementById('confirm').required = true;
+        submitBtn.textContent = 'Set Password';
+      }
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.style.display = 'block';
+    }
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      errorEl.style.display = 'none';
+      const password = document.getElementById('password').value;
+
+      if (isSetup) {
+        const confirm = document.getElementById('confirm').value;
+        if (password !== confirm) { showError('Passwords do not match.'); return; }
+        if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = isSetup ? 'Setting up…' : 'Logging in…';
+
+      try {
+        const endpoint = isSetup ? '/api/auth/setup' : '/api/auth/login';
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          showError(data.error || 'Something went wrong.');
+          submitBtn.disabled = false;
+          submitBtn.textContent = isSetup ? 'Set Password' : 'Log In';
+          return;
+        }
+        location.href = '/dashboard';
+      } catch {
+        showError('Connection failed.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = isSetup ? 'Set Password' : 'Log In';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

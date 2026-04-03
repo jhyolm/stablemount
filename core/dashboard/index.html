@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stablemount</title>
+  <link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-mark">&#9670;</span>
+        <span class="logo-text">Stablemount</span>
+      </div>
+      <nav class="nav" aria-label="Main navigation">
+        <a class="nav-item active" data-view="pages" role="button" tabindex="0" aria-current="page">Pages</a>
+        <a class="nav-item" data-view="collections" role="button" tabindex="0">Collections</a>
+        <div class="nav-sub" id="nav-collections-sub" style="display:none" role="group" aria-label="Collections"></div>
+        <a class="nav-item" data-view="decisions" role="button" tabindex="0">Decisions</a>
+        <a class="nav-item" data-view="partials" role="button" tabindex="0">Components</a>
+        <a class="nav-item" data-view="media" role="button" tabindex="0">Media</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="site-name" id="site-name">My Website</span>
+        <button class="logout-btn" id="logout-btn" title="Log out" aria-label="Log out">Log out</button>
+      </div>
+    </aside>
+    <main class="content" id="content" role="main" aria-live="polite"></main>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <button class="dash-chat-fab" id="dash-chat-fab" title="Site Chat" aria-label="Open site chat">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  </button>
+
+  <div class="dash-chat-panel" id="dash-chat-panel">
+    <div class="dash-chat-header">
+      <span>Site Chat</span>
+      <div class="dash-chat-header-actions">
+        <button class="dash-chat-clear" id="dash-chat-clear" title="Clear history">Clear</button>
+        <button class="dash-chat-close" id="dash-chat-close">&times;</button>
+      </div>
+    </div>
+    <div class="dash-chat-messages" id="dash-chat-messages"></div>
+    <div class="dash-chat-input">
+      <textarea id="dash-chat-input" placeholder="e.g. Create a blog collection with 5 entries, add a contact page..." rows="2"></textarea>
+      <button class="btn btn-primary dash-chat-send" id="dash-chat-send">Send</button>
+    </div>
+  </div>
+
+  <script src="/dashboard/app.js"></script>
+  <script>(() => { let r = false; const e = new EventSource('/api/livereload'); e.onopen = () => { if (r) location.reload(); }; e.onerror = () => { r = true; }; })();</script>
+</body>
+</html>
