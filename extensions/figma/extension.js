@@ -47,7 +47,7 @@ export const routes = [
       return { status: 404, body: { error: 'Not found' } };
     },
 
-    async POST({ params, body }) {
+    async POST({ params, body, req }) {
       if (params.path === 'settings') {
         const current = readSettings();
         const update = {};
@@ -66,7 +66,8 @@ export const routes = [
       }
 
       if (params.path === 'apply') {
-        return handleApply(body);
+        const cookie = req?.headers?.cookie || '';
+        return handleApply(body, cookie);
       }
 
       return { status: 404, body: { error: 'Not found' } };
@@ -177,8 +178,9 @@ async function handleExtract({ figmaUrl }) {
   };
 }
 
-async function handleApply({ tokens, structure, decisions, page, mode, newPage }) {
+async function handleApply({ tokens, structure, decisions, page, mode, newPage }, cookie) {
   const base = `http://localhost:${process.env.PORT || 3000}`;
+  const authHeaders = cookie ? { Cookie: cookie } : {};
 
   if (mode === 'create' && newPage) {
     const intent = buildFigmaPrompt(tokens, structure, decisions, mode, newPage.intent);
@@ -186,7 +188,7 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
     try {
       const res = await fetch(`${base}/api/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           title: newPage.title,
           slug: newPage.slug,
@@ -211,7 +213,7 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
 
   if (page) {
     try {
-      const pageRes = await fetch(`${base}/api/pages/${page}/html`);
+      const pageRes = await fetch(`${base}/api/pages/${page}/html`, { headers: authHeaders });
       if (pageRes.ok) chatPayload.html = await pageRes.text();
     } catch {}
   }
@@ -219,7 +221,7 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage }
   try {
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(chatPayload),
     });
     const data = await res.json();

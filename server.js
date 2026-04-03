@@ -253,7 +253,7 @@ const server = createServer(async (req, res) => {
 
     // ── Auth guard ──
     if (hasUsers() && !isAuthenticated(req)) {
-      if (path.startsWith('/api/')) return send(res, 401, { error: 'Unauthorized' });
+      if (path.startsWith('/api/') || path.startsWith('/x/')) return send(res, 401, { error: 'Unauthorized' });
       res.writeHead(302, { Location: '/login' });
       return res.end();
     }
