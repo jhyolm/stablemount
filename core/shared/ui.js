@@ -84,6 +84,183 @@ export async function mountComponentPreview(container, partialId, siteCSS) {
   } catch {}
 }
 
+// ── Component Editor (full-window, shared between dashboard & overlay) ──
+
+export async function openComponentEditor({ partial, onSave, onClose }) {
+  const isNew = !partial;
+  const existing = partial || {};
+
+  let html = '';
+  let siteCSS = '';
+  if (existing.id) {
+    const [htmlRes, css] = await Promise.all([
+      fetch('/api/partials/' + existing.id + '/html').then(r => r.ok ? r.text() : ''),
+      fetchSiteCSS(),
+    ]);
+    html = htmlRes;
+    siteCSS = css;
+  } else {
+    siteCSS = await fetchSiteCSS();
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sm-editor-backdrop';
+  backdrop.setAttribute('data-sm-overlay', '');
+  backdrop.innerHTML = `
+    <div class="sm-editor">
+      <div class="sm-editor-header">
+        <h2 class="sm-editor-title">${isNew ? 'New Component' : esc(existing.name)}</h2>
+        <div class="sm-editor-header-actions">
+          <button class="sm-editor-btn sm-editor-save">Save</button>
+          <button class="sm-editor-btn sm-editor-cancel">Cancel</button>
+        </div>
+      </div>
+      <div class="sm-editor-body">
+        <div class="sm-editor-left">
+          <div class="sm-editor-meta">
+            <div class="sm-editor-field">
+              <label>Name</label>
+              <input name="name" value="${esc(existing.name)}" placeholder="e.g. header, footer, hero-card" required>
+            </div>
+            <div class="sm-editor-row">
+              <div class="sm-editor-field">
+                <label>Type</label>
+                <select name="isPattern">
+                  <option value="false" ${!existing.isPattern ? 'selected' : ''}>Partial</option>
+                  <option value="true" ${existing.isPattern ? 'selected' : ''}>Pattern</option>
+                </select>
+              </div>
+              <div class="sm-editor-field">
+                <label>Mode</label>
+                <select name="mode">
+                  <option value="global" ${(existing.mode || 'global') === 'global' ? 'selected' : ''}>Global</option>
+                  <option value="injectable" ${existing.mode === 'injectable' ? 'selected' : ''}>Injectable</option>
+                </select>
+              </div>
+              <div class="sm-editor-field">
+                <label>Weight</label>
+                <select name="weight">
+                  <option value="rule" ${(existing.weight || 'rule') === 'rule' ? 'selected' : ''}>Rule</option>
+                  <option value="guide" ${existing.weight === 'guide' ? 'selected' : ''}>Guide</option>
+                </select>
+              </div>
+              <div class="sm-editor-field">
+                <label>Scope</label>
+                <select name="scope">
+                  <option value="global" ${(existing.scope || 'global') === 'global' ? 'selected' : ''}>Global</option>
+                  <option value="page" ${existing.scope === 'page' ? 'selected' : ''}>Page</option>
+                  <option value="collection" ${existing.scope === 'collection' ? 'selected' : ''}>Collection</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="sm-editor-source">
+            <div class="sm-editor-source-header">
+              <label>HTML Source</label>
+            </div>
+            <textarea class="sm-editor-textarea" spellcheck="false" placeholder="<header>...</header>">${esc(html)}</textarea>
+          </div>
+        </div>
+        <div class="sm-editor-right">
+          <div class="sm-editor-preview-header"><label>Preview</label></div>
+          <div class="sm-editor-preview-wrap">
+            <iframe class="sm-editor-preview" sandbox="allow-same-origin"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  const textarea = backdrop.querySelector('.sm-editor-textarea');
+  const previewFrame = backdrop.querySelector('.sm-editor-preview');
+
+  function renderPreview(content) {
+    let markup = content;
+    let partialCSS = '';
+    let partialJS = '';
+    const styleRx = /<style>([\s\S]*?)<\/style>/gi;
+    const scriptRx = /<script>([\s\S]*?)<\/script>/gi;
+    for (const m of content.matchAll(styleRx)) { partialCSS += m[1]; markup = markup.replace(m[0], ''); }
+    for (const m of content.matchAll(scriptRx)) { partialJS += m[1]; markup = markup.replace(m[0], ''); }
+    previewFrame.srcdoc = '<!DOCTYPE html><html><head>' + siteCSS +
+      '<style>body{margin:0;background:#fff;}' + partialCSS + '</style></head><body>' +
+      markup.trim() + (partialJS ? '<script>' + partialJS + '<\/script>' : '') + '</body></html>';
+  }
+
+  if (html) renderPreview(html);
+
+  let debounceTimer;
+  textarea.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => renderPreview(textarea.value), 200);
+  });
+
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = textarea.selectionStart, end = textarea.selectionEnd;
+      textarea.value = textarea.value.substring(0, s) + '  ' + textarea.value.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = s + 2;
+    }
+  });
+
+  function close() {
+    backdrop.remove();
+    if (onClose) onClose();
+  }
+
+  backdrop.querySelector('.sm-editor-cancel').addEventListener('click', close);
+  backdrop.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  backdrop.querySelector('.sm-editor-save').addEventListener('click', async () => {
+    const name = backdrop.querySelector('[name="name"]').value.trim();
+    if (!name) { backdrop.querySelector('[name="name"]').focus(); return; }
+
+    const data = {
+      name,
+      mode: backdrop.querySelector('[name="mode"]').value,
+      weight: backdrop.querySelector('[name="weight"]').value,
+      scope: backdrop.querySelector('[name="scope"]').value,
+      isPattern: backdrop.querySelector('[name="isPattern"]').value === 'true',
+      html: textarea.value,
+    };
+
+    const saveBtn = backdrop.querySelector('.sm-editor-save');
+    saveBtn.textContent = 'Saving…';
+    saveBtn.disabled = true;
+
+    try {
+      if (existing.id) {
+        const { html: htmlContent, ...meta } = data;
+        await fetch('/api/partials/' + existing.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(meta),
+        });
+        await fetch('/api/partials/' + existing.id + '/html', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/html' },
+          body: htmlContent,
+        });
+      } else {
+        await fetch('/api/partials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+      }
+      close();
+      if (onSave) onSave(data);
+    } catch (err) {
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+    }
+  });
+
+  textarea.focus();
+}
+
 // ── Decision Rendering ──
 
 export function renderDecisionRow(d, opts = {}) {

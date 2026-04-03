@@ -507,14 +507,6 @@
   padding: 4px;
 }
 
-.sm-component-editor-box { width: 500px; }
-.sm-component-editor-textarea {
-  width: 100%; min-height: 260px; background: #1e293b; color: #e2e8f0;
-  border: 1px solid #334155; border-radius: 4px; padding: 10px;
-  font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace;
-  resize: vertical; line-height: 1.5; tab-size: 2; box-sizing: border-box;
-}
-.sm-component-editor-textarea:focus { outline: none; border-color: #0891b2; }
 
 /* ── Overlay-specific media grid ── */
 

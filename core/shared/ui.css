@@ -82,6 +82,202 @@
 .sm-comp-delete { border-color: transparent; margin-left: auto; }
 .sm-comp-delete:hover { color: #ef4444; background: none; }
 
+/* ── Component Editor (full-window) ── */
+
+.sm-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.sm-editor {
+  background: #0f172a;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
+  max-width: 1600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+  color: #e2e8f0;
+}
+
+.sm-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+
+.sm-editor-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.sm-editor-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sm-editor-btn {
+  padding: 6px 18px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  transition: all 0.15s;
+}
+.sm-editor-btn:hover { background: #334155; }
+.sm-editor-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sm-editor-save {
+  background: #0891b2;
+  border-color: #0891b2;
+  color: #fff;
+}
+.sm-editor-save:hover { background: #0e7490; }
+
+.sm-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sm-editor-left {
+  width: 420px;
+  min-width: 320px;
+  max-width: 50%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+
+.sm-editor-meta {
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+
+.sm-editor-row {
+  display: flex;
+  gap: 10px;
+}
+.sm-editor-row .sm-editor-field { flex: 1; }
+
+.sm-editor-field {
+  margin-bottom: 10px;
+}
+.sm-editor-field label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.sm-editor-field input,
+.sm-editor-field select {
+  width: 100%;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.sm-editor-field input:focus,
+.sm-editor-field select:focus {
+  outline: none;
+  border-color: #0891b2;
+}
+
+.sm-editor-source {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sm-editor-source-header {
+  padding: 8px 16px;
+  flex-shrink: 0;
+}
+.sm-editor-source-header label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sm-editor-textarea {
+  flex: 1;
+  width: 100%;
+  background: #020617;
+  color: #e2e8f0;
+  border: none;
+  border-top: 1px solid #1e293b;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace;
+  line-height: 1.6;
+  tab-size: 2;
+  resize: none;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.sm-editor-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sm-editor-preview-header {
+  padding: 8px 16px;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+.sm-editor-preview-header label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sm-editor-preview-wrap {
+  flex: 1;
+  overflow: auto;
+  background: #fff;
+}
+
+.sm-editor-preview {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
 /* ── Decision Rows ── */
 
 .sm-dec-row {

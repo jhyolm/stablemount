@@ -905,13 +905,8 @@
         }
       });
 
-      card.querySelector('.sm-comp-edit').addEventListener('click', async () => {
-        try {
-          const res = await fetch(`/api/partials/${compId}/html`);
-          if (!res.ok) throw new Error('Load failed');
-          const html = await res.text();
-          showComponentEditor(compId, html);
-        } catch (err) { toast('Error: ' + err.message); }
+      card.querySelector('.sm-comp-edit').addEventListener('click', () => {
+        showComponentEditor(compId);
       });
 
       card.querySelector('.sm-comp-delete').addEventListener('click', async () => {
@@ -942,34 +937,18 @@
     })(p, opts);
   }
 
-  function showComponentEditor(compId, html) {
-    const modal = document.createElement('div');
-    modal.className = 'sm-site-modal';
-    modal.setAttribute('data-sm-overlay', '');
-    modal.innerHTML = `
-      <div class="sm-site-modal-box sm-component-editor-box">
-        <h3>Edit Component</h3>
-        <textarea class="sm-component-editor-textarea" id="sm-comp-editor">${esc(html)}</textarea>
-        <div class="sm-site-modal-actions">
-          <button class="sm-btn" id="sm-comp-save">Save</button>
-          <button class="sm-btn sm-btn-cancel" id="sm-comp-cancel">Cancel</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-    modal.querySelector('#sm-comp-editor').focus();
-    modal.querySelector('#sm-comp-cancel').addEventListener('click', () => modal.remove());
-    modal.querySelector('#sm-comp-save').addEventListener('click', async () => {
-      try {
-        const res = await fetch(`/api/partials/${compId}/html`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'text/html' },
-          body: modal.querySelector('#sm-comp-editor').value,
+  function showComponentEditor(compId) {
+    fetch('/api/partials').then(r => r.ok ? r.json() : []).then(list => {
+      const partial = list.find(p => p.id === compId);
+      const opener = UI().openComponentEditor;
+      if (opener) {
+        opener({
+          partial: partial || { id: compId },
+          onSave: () => { toast('Component saved'); loadComponentsTab(); },
         });
-        if (!res.ok) throw new Error('Save failed');
-        modal.remove();
-        toast('Component saved');
-        loadComponentsTab();
-      } catch (err) { toast('Error: ' + err.message); }
+      } else {
+        toast('Editor unavailable');
+      }
     });
   }
 

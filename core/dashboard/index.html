@@ -57,7 +57,8 @@
     </div>
   </div>
 
-  <script src="/dashboard/app.js"></script>
+  <script type="module">import * as ui from '/shared/ui.js'; window.__SM_UI__ = ui;</script>
+  <script src="/dashboard/app.js" defer></script>
   <script>(() => { let r = false; const e = new EventSource('/api/livereload'); e.onopen = () => { if (r) location.reload(); }; e.onerror = () => { r = true; }; })();</script>
 </body>
 </html>

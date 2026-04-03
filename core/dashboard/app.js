@@ -626,128 +626,13 @@ async function getSiteCSS() {
 }
 
 window.showPartialModal = async function(editId) {
+  const UI = window.__SM_UI__ || {};
+  if (!UI.openComponentEditor) return;
   const existing = editId ? state.partials.find(p => p.id === editId) : null;
-  let html = '';
-  let siteCSS = '';
-  if (existing) {
-    const [htmlRes, css] = await Promise.all([
-      fetch('/api/partials/' + editId + '/html'),
-      getSiteCSS(),
-    ]);
-    html = await htmlRes.text();
-    siteCSS = css;
-  }
-
-  showModal(`<h2>${existing ? 'Edit Component' : 'Add Component'}</h2>
-    <form id="partial-form">
-      <div class="form-group"><label>Name</label>
-        <input name="name" required value="${esc(existing?.name)}" placeholder="e.g. header, footer, hero-card"></div>
-      <div class="form-row">
-        <div class="form-group"><label>Type</label>
-          <select name="isPattern">
-            <option value="false" ${!existing?.isPattern?'selected':''}>Partial — server-injected via directive</option>
-            <option value="true" ${existing?.isPattern?'selected':''}>Pattern — AI reference template</option>
-          </select></div>
-        <div class="form-group"><label>Mode</label>
-          <select name="mode">
-            <option value="global" ${(existing?.mode || 'global')==='global'?'selected':''}>Global</option>
-            <option value="injectable" ${existing?.mode==='injectable'?'selected':''}>Injectable (slots)</option>
-          </select></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Weight</label>
-          <select name="weight">
-            <option value="rule" ${(existing?.weight || 'rule')==='rule'?'selected':''}>Rule — use exactly</option>
-            <option value="guide" ${existing?.weight==='guide'?'selected':''}>Guide — preferred, can deviate</option>
-          </select></div>
-        <div class="form-group"><label>Scope</label>
-          <select name="scope">
-            <option value="global" ${(existing?.scope || 'global')==='global'?'selected':''}>Global</option>
-            <option value="page" ${existing?.scope?.startsWith('page')?'selected':''}>Page</option>
-            <option value="collection" ${existing?.scope?.startsWith('collection')?'selected':''}>Collection</option>
-          </select></div>
-      </div>
-      ${html ? `<div class="form-group"><label>Preview</label>
-        <div class="comp-preview-wrap">
-          <iframe id="comp-preview" class="comp-preview" sandbox="allow-same-origin"></iframe>
-        </div></div>` : ''}
-      <div class="form-group">
-        <div class="comp-source-header">
-          <label>HTML Source</label>
-          ${html ? '<button type="button" class="btn btn-sm" id="comp-toggle-source">Show Source</button>' : ''}
-        </div>
-        <div id="comp-source-wrap" ${html ? 'style="display:none"' : ''}>
-          <textarea name="html" id="comp-html" class="code-textarea" rows="12" placeholder="<header>...</header>" spellcheck="false">${esc(html)}</textarea>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary">${existing ? 'Save' : 'Add'}</button>
-      </div>
-    </form>`);
-
-  const previewFrame = document.getElementById('comp-preview');
-  function renderPreview(content) {
-    if (!previewFrame) return;
-    let markup = content;
-    let partialCSS = '';
-    let partialJS = '';
-    const styleRx = /<style>([\s\S]*?)<\/style>/gi;
-    const scriptRx = /<script>([\s\S]*?)<\/script>/gi;
-    for (const m of content.matchAll(styleRx)) { partialCSS += m[1]; markup = markup.replace(m[0], ''); }
-    for (const m of content.matchAll(scriptRx)) { partialJS += m[1]; markup = markup.replace(m[0], ''); }
-    previewFrame.srcdoc = `<!DOCTYPE html><html><head>${siteCSS}<style>body{margin:0;}${partialCSS}</style></head><body>${markup.trim()}${partialJS ? `<script>${partialJS}<\/script>` : ''}</body></html>`;
-  }
-  if (previewFrame && html) renderPreview(html);
-
-  const toggleBtn = document.getElementById('comp-toggle-source');
-  const sourceWrap = document.getElementById('comp-source-wrap');
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      const visible = sourceWrap.style.display !== 'none';
-      sourceWrap.style.display = visible ? 'none' : 'block';
-      toggleBtn.textContent = visible ? 'Show Source' : 'Hide Source';
-    });
-  }
-
-  const textarea = document.getElementById('comp-html');
-  if (textarea) {
-    textarea.addEventListener('keydown', e => {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + 2;
-      }
-    });
-    textarea.addEventListener('input', () => renderPreview(textarea.value));
-  }
-
-  document.getElementById('partial-form').onsubmit = async e => {
-    e.preventDefault();
-    const f = e.target;
-    const data = {
-      name: f.name.value,
-      mode: f.mode.value,
-      weight: f.weight.value,
-      scope: f.scope.value,
-      isPattern: f.isPattern.value === 'true',
-      html: f.html.value,
-    };
-    if (existing) {
-      const { html: htmlContent, ...meta } = data;
-      await api('PUT', '/partials/' + editId, meta);
-      await fetch('/api/partials/' + editId + '/html', {
-        method: 'PUT', body: htmlContent,
-        headers: { 'Content-Type': 'text/html' },
-      });
-    } else {
-      await api('POST', '/partials', data);
-    }
-    hideModal();
-    await load();
-  };
+  UI.openComponentEditor({
+    partial: existing || undefined,
+    onSave: () => load(),
+  });
 };
 
 window.deletePartialAction = async function(id) {
