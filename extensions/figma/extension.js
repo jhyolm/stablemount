@@ -250,31 +250,44 @@ async function handleApply({ tokens, structure, decisions, page, mode, newPage, 
 
 async function fetchFigmaImageURLs(fileKey, nodeIds, figmaToken, format = 'png') {
   if (!nodeIds.length) return {};
-  const ids = nodeIds.join(',');
+  const ids = nodeIds.map(id => encodeURIComponent(id)).join(',');
   const scale = format === 'svg' ? '' : '&scale=2';
-  const url = `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(ids)}&format=${format}${scale}`;
+  const url = `https://api.figma.com/v1/images/${fileKey}?ids=${ids}&format=${format}${scale}`;
+  console.log(`[figma] Fetching ${format} renders for ${nodeIds.length} nodes`);
   try {
     const res = await fetch(url, { headers: { 'X-Figma-Token': figmaToken } });
-    if (!res.ok) return {};
+    if (!res.ok) {
+      console.warn(`[figma] Images API returned ${res.status}`);
+      return {};
+    }
     const data = await res.json();
-    return data.images || {};
-  } catch { return {}; }
+    const urls = data.images || {};
+    const valid = Object.values(urls).filter(v => v).length;
+    console.log(`[figma] Got ${valid}/${nodeIds.length} render URLs (${format})`);
+    return urls;
+  } catch (err) {
+    console.warn('[figma] Images API error:', err.message);
+    return {};
+  }
 }
 
 async function downloadAndSaveImage(imageUrl, filename, cookie, baseUrl) {
   try {
     const res = await fetch(imageUrl);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[figma] Failed to download image: ${res.status} for ${filename}`);
+      return null;
+    }
     const buffer = Buffer.from(await res.arrayBuffer());
     const ext = filename.endsWith('.svg') ? 'svg' : 'png';
     const mimeType = ext === 'svg' ? 'image/svg+xml' : 'image/png';
 
-    const boundary = '----FigmaUpload' + Date.now();
+    const boundary = '----FigmaUpload' + Date.now() + Math.random().toString(36).slice(2);
     const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`;
     const footer = `\r\n--${boundary}--\r\n`;
     const body = Buffer.concat([Buffer.from(header), buffer, Buffer.from(footer)]);
 
-    const uploadRes = await fetch(`${baseUrl}/api/media`, {
+    const uploadRes = await fetch(`${baseUrl}/api/media/upload`, {
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -282,10 +295,18 @@ async function downloadAndSaveImage(imageUrl, filename, cookie, baseUrl) {
       },
       body,
     });
-    if (!uploadRes.ok) return null;
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(() => '');
+      console.warn(`[figma] Failed to upload ${filename}: ${uploadRes.status} ${errText}`);
+      return null;
+    }
     const result = await uploadRes.json();
+    console.log(`[figma] Saved image: ${filename} → ${result.path}`);
     return result.path || null;
-  } catch { return null; }
+  } catch (err) {
+    console.warn(`[figma] Image download/upload error for ${filename}:`, err.message);
+    return null;
+  }
 }
 
 function slugifyFilename(name) {
@@ -295,6 +316,8 @@ function slugifyFilename(name) {
 async function extractAndSaveImages(fileKey, figmaData, nodeId, figmaToken, cookie) {
   const base = `http://localhost:${process.env.PORT || 3000}`;
   const imageNodes = collectImageNodes(figmaData, nodeId);
+  console.log(`[figma] Found ${imageNodes.raster.length} raster + ${imageNodes.vector.length} vector nodes to extract`);
+  if (!imageNodes.raster.length && !imageNodes.vector.length) return {};
   const imageMap = {};
 
   const rasterIds = imageNodes.raster.map(n => n.id);

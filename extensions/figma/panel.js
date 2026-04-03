@@ -107,8 +107,7 @@ export function renderPanel() {
     </div>
 
     <div class="actions">
-      <button class="btn" id="extract-btn">Extract from Figma</button>
-      <button class="btn btn-secondary" id="apply-btn" disabled>Send to AI</button>
+      <button class="btn" id="extract-btn">Import from Figma</button>
     </div>
 
     <div class="status" id="import-status"></div>
@@ -246,13 +245,10 @@ export function renderPanel() {
     const createSlug = document.getElementById('create-slug');
     const createIntent = document.getElementById('create-intent');
     const extractBtn = document.getElementById('extract-btn');
-    const applyBtn = document.getElementById('apply-btn');
     const importStatus = document.getElementById('import-status');
     const resultsEl = document.getElementById('results');
     const tokenList = document.getElementById('token-list');
     const structureTree = document.getElementById('structure-tree');
-
-    let extractedData = null;
 
     modeSelect.addEventListener('change', () => {
       const isCreate = modeSelect.value === 'create';
@@ -285,9 +281,15 @@ export function renderPanel() {
       const url = urlInput.value.trim();
       if (!url) return setImportStatus('Please enter a Figma file URL.', 'error');
 
-      extractBtn.disabled = true;
-      setImportStatus('Fetching from Figma API...', 'info');
+      const isCreate = modeSelect.value === 'create';
+      if (isCreate && !createTitle.value.trim()) {
+        return setImportStatus('Please enter a page title.', 'error');
+      }
 
+      extractBtn.disabled = true;
+      setImportStatus('Extracting from Figma...', 'info');
+
+      let extractedData;
       try {
         const res = await fetch('/x/figma/extract', {
           method: 'POST',
@@ -301,26 +303,12 @@ export function renderPanel() {
         renderResults(data);
         const imgCount = data.imageMap ? Object.keys(data.imageMap).length : 0;
         const imgMsg = imgCount ? ', ' + imgCount + ' images' : '';
-        setImportStatus('Extracted ' + data.tokens.colors.length + ' colors, ' + data.tokens.fonts.length + ' fonts, ' + data.structure.length + ' sections' + imgMsg + '.', 'success');
-        applyBtn.disabled = false;
+        setImportStatus('Extracted ' + data.tokens.colors.length + ' colors, ' + data.tokens.fonts.length + ' fonts, ' + data.structure.length + ' sections' + imgMsg + '. Sending to AI...', 'info');
       } catch (err) {
         setImportStatus('Error: ' + err.message, 'error');
-      } finally {
         extractBtn.disabled = false;
-      }
-    });
-
-    applyBtn.addEventListener('click', async () => {
-      if (!extractedData) return;
-
-      const isCreate = modeSelect.value === 'create';
-      if (isCreate && !createTitle.value.trim()) {
-        setImportStatus('Please enter a page title.', 'error');
         return;
       }
-
-      applyBtn.disabled = true;
-      setImportStatus('Sending to AI...', 'info');
 
       const payload = {
         tokens: extractedData.tokens,
@@ -349,11 +337,11 @@ export function renderPanel() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Apply failed');
 
-        setImportStatus('AI response: ' + (data.reply || 'Done. Check your pages.'), 'success');
+        setImportStatus(data.reply || 'Done. Check your pages.', 'success');
       } catch (err) {
         setImportStatus('Error: ' + err.message, 'error');
       } finally {
-        applyBtn.disabled = false;
+        extractBtn.disabled = false;
       }
     });
 
