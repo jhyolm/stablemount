@@ -28,7 +28,7 @@ import {
   createSession, getSessionUser, validateSession, destroySession,
   saveSnapshot, listSnapshots, getSnapshot, restoreSnapshot,
   listDecisions, createDecision, updateDecision, deleteDecision, saveDecisions,
-  listPartials, getPartialHTML, createPartial, updatePartial, deletePartial,
+  listPartials, getPartialHTML, createPartial, updatePartial, deletePartial, findPartialUsage,
   listPages, getPageBySlug, getPageHTML, createPage, updatePage, savePageHTML, deletePage,
   getPartialByName, getPartialHTMLByName, savePartialHTMLByName,
   getChat, appendChat, clearChat,
@@ -110,7 +110,23 @@ async function jsonBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
+function buildTokenStyle() {
+  const tokens = listDecisions().filter(d => d.kind === 'token' && d.variable);
+  if (!tokens.length) return '';
+  const vars = tokens.map(t => `  --${t.variable}: ${t.content};`).join('\n');
+  return `<style data-sm-tokens>:root {\n${vars}\n}</style>`;
+}
+
 function injectOverlay(html, slug, pageTitle) {
+  const tokenStyle = buildTokenStyle();
+  if (tokenStyle) {
+    html = html.replace(
+      /(<style[^>]*>)\s*:root\s*\{[^}]*\}/,
+      (m, styleTag) => styleTag
+    );
+    html = html.replace('</head>', `${tokenStyle}\n</head>`);
+  }
+
   const config = `<script data-sm-overlay>window.__SM__={slug:${JSON.stringify(slug)},title:${JSON.stringify(pageTitle || slug)}};</script>`;
   const css = '<link rel="stylesheet" href="/shared/ui.css" data-sm-overlay>\n<link rel="stylesheet" href="/overlay/overlay.css" data-sm-overlay>';
   const uiLoader = '<script type="module" data-sm-overlay>import * as ui from "/shared/ui.js"; window.__SM_UI__ = ui;</script>';
@@ -415,7 +431,20 @@ const server = createServer(async (req, res) => {
       if (r) broadcast('partials');
       return r ? send(res, 200, r) : send(res, 404, { error: 'Not found' });
     }
-    if (m && method === 'DELETE') { deletePartial(m[1]); broadcast('partials'); return send(res, 204, ''); }
+    if (m && method === 'DELETE') {
+      const partial = listPartials().find(p => p.id === m[1]);
+      const force = url.searchParams.get('force') === 'true';
+      if (!force && partial) {
+        const usage = findPartialUsage(partial.name);
+        if (usage.length) {
+          return send(res, 409, { error: 'Partial in use', usage, message: `Used on ${usage.length} page(s). Delete with ?force=true to inline HTML back into pages.` });
+        }
+      }
+      deletePartial(m[1], { inlineBack: true });
+      broadcast('partials');
+      broadcast('pages');
+      return send(res, 200, { deleted: true, inlined: !!partial });
+    }
 
     // ── API: Pages ──
     if (path === '/api/pages' && method === 'GET') return send(res, 200, listPages());
@@ -502,7 +531,7 @@ const server = createServer(async (req, res) => {
         newDecisions.push(createDecision({
           name: d.name, kind: d.kind,
           weight: d.weight || 'rule', scope: d.scope || 'global',
-          content: d.content || '',
+          content: d.content || '', variable: d.variable,
         }));
       }
 
@@ -590,7 +619,7 @@ const server = createServer(async (req, res) => {
             }
             case 'deletePartial': {
               const partial = getPartialByName(a.name);
-              if (partial) { deletePartial(partial.id); broadcast('partials'); actionResults.push({ action: 'deletePartial', name: a.name }); }
+              if (partial) { deletePartial(partial.id, { inlineBack: true }); broadcast('partials'); broadcast('pages'); actionResults.push({ action: 'deletePartial', name: a.name }); }
               break;
             }
             case 'deletePage': {

@@ -303,13 +303,14 @@ export function getDecision(targetId) {
   return listDecisions().find(d => d.id === targetId) || null;
 }
 
-export function createDecision({ name, kind, weight = 'rule', scope = 'global', content = '' }) {
+export function createDecision({ name, kind, weight = 'rule', scope = 'global', content = '', variable }) {
   const decisions = listDecisions();
   const decision = {
     id: genId(), name, kind, weight, scope, content,
     created: new Date().toISOString(),
     updated: new Date().toISOString(),
   };
+  if (kind === 'token') decision.variable = variable || slugify(name);
   decisions.push(decision);
   writeJSON(PATHS.decisions, decisions);
   return decision;
@@ -320,6 +321,9 @@ export function updateDecision(targetId, updates) {
   const idx = decisions.findIndex(d => d.id === targetId);
   if (idx === -1) return null;
   Object.assign(decisions[idx], updates, { updated: new Date().toISOString() });
+  if (decisions[idx].kind === 'token' && !decisions[idx].variable) {
+    decisions[idx].variable = slugify(decisions[idx].name);
+  }
   writeJSON(PATHS.decisions, decisions);
   return decisions[idx];
 }
@@ -410,8 +414,47 @@ export function updatePartial(targetId, updates) {
   return partials[idx];
 }
 
-export function deletePartial(targetId) {
+export function findPartialUsage(name) {
+  const pages = listPages();
+  const directive = `<!-- @partial:${name}`;
+  const using = [];
+  for (const page of pages) {
+    const html = getPageHTML(page.slug);
+    if (html && html.includes(directive)) {
+      using.push({ slug: page.slug, title: page.title });
+    }
+  }
+  return using;
+}
+
+export function inlinePartialIntoPages(name, html) {
+  const pages = listPages();
+  const directiveRegex = new RegExp(`<!-- @partial:${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} -->`, 'g');
+  const resolvedRegex = new RegExp(
+    `<!-- @partial:${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:begin -->[\\s\\S]*?<!-- @partial:${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:end -->`,
+    'g'
+  );
+  let count = 0;
+  for (const page of pages) {
+    let pageHTML = getPageHTML(page.slug);
+    if (!pageHTML) continue;
+    const before = pageHTML;
+    pageHTML = pageHTML.replace(resolvedRegex, html);
+    pageHTML = pageHTML.replace(directiveRegex, html);
+    if (pageHTML !== before) {
+      savePageHTML(page.slug, pageHTML);
+      count++;
+    }
+  }
+  return count;
+}
+
+export function deletePartial(targetId, { inlineBack = false } = {}) {
   const p = getPartial(targetId);
+  if (p && inlineBack) {
+    const html = getPartialHTML(targetId);
+    if (html) inlinePartialIntoPages(p.name, html);
+  }
   writeJSON(PATHS.partials, listPartials().filter(c => c.id !== targetId));
   if (p) {
     const file = join(PATHS.partialsDir, `${partialSlug(p.name)}.html`);

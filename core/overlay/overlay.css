@@ -565,6 +565,14 @@
 .sm-site-modal-box input:focus,
 .sm-site-modal-box select:focus { outline: none; border-color: #0891b2; }
 
+.sm-dec-var-preview {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: monospace;
+  margin-top: 3px;
+}
+
 .sm-site-modal-actions {
   display: flex;
   gap: 8px;

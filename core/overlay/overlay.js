@@ -727,7 +727,8 @@
 
   function renderDecisionRowFallback(d) {
     const isColor = d.kind === 'token' && /^(#[0-9a-f]{3,8}|rgb|hsl)/i.test(d.content);
-    return `<div class="sm-dec-row" data-dec-id="${esc(d.id)}">
+    const varAttr = d.variable ? ` data-variable="${esc(d.variable)}"` : '';
+    return `<div class="sm-dec-row" data-dec-id="${esc(d.id)}"${varAttr}>
       <div class="sm-dec-main">
         ${isColor ? `<span class="sm-dec-swatch" style="background:${esc(d.content)}"></span>` : ''}
         <span class="sm-dec-name">${esc(d.name)}</span>
@@ -759,7 +760,7 @@
         await saveDecision(id, { content: val });
         const swatch = row.querySelector('.sm-dec-swatch');
         if (swatch) swatch.style.background = val;
-        applyDecisionLive(row.querySelector('.sm-dec-name').textContent, val);
+        applyDecisionLive(row.dataset.variable, val);
       });
 
       row.querySelectorAll('.sm-dec-select').forEach(sel => {
@@ -786,9 +787,13 @@
     } catch { toast('Save failed'); }
   }
 
-  function applyDecisionLive(name, value) {
-    if (!name.startsWith('color-') && !name.startsWith('font-')) return;
-    document.documentElement.style.setProperty('--sm-' + name, value);
+  function applyDecisionLive(variable, value) {
+    if (!variable) return;
+    document.documentElement.style.setProperty('--' + variable, value);
+  }
+
+  function slugifyName(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   }
 
   function showAddDecision() {
@@ -798,12 +803,13 @@
     modal.innerHTML = `
       <div class="sm-site-modal-box">
         <h3>New Decision</h3>
-        <label>Name<input type="text" id="sm-new-dec-name" placeholder="e.g. color-primary"></label>
+        <label>Name<input type="text" id="sm-new-dec-name" placeholder="e.g. Primary Color"></label>
         <label>Kind<select id="sm-new-dec-kind">
           <option value="token">token</option>
           <option value="instruction">instruction</option>
           <option value="asset">asset</option>
         </select></label>
+        <label id="sm-new-dec-var-label">CSS Variable<input type="text" id="sm-new-dec-variable" placeholder="auto-generated from name"><span class="sm-dec-var-preview"></span></label>
         <label>Content<input type="text" id="sm-new-dec-content" placeholder="e.g. #3b82f6"></label>
         <label>Weight<select id="sm-new-dec-weight">
           <option value="guide">guide</option>
@@ -816,19 +822,50 @@
         </div>
       </div>`;
     document.body.appendChild(modal);
-    modal.querySelector('#sm-new-dec-name').focus();
+
+    const nameInput = modal.querySelector('#sm-new-dec-name');
+    const kindSelect = modal.querySelector('#sm-new-dec-kind');
+    const varLabel = modal.querySelector('#sm-new-dec-var-label');
+    const varInput = modal.querySelector('#sm-new-dec-variable');
+    const varPreview = modal.querySelector('.sm-dec-var-preview');
+    let autoVar = true;
+
+    function updateVarVisibility() {
+      varLabel.style.display = kindSelect.value === 'token' ? '' : 'none';
+    }
+    function updateVarPreview() {
+      const v = varInput.value || slugifyName(nameInput.value);
+      varPreview.textContent = v ? `var(--${v})` : '';
+    }
+
+    kindSelect.addEventListener('change', updateVarVisibility);
+    nameInput.addEventListener('input', () => {
+      if (autoVar) varInput.value = slugifyName(nameInput.value);
+      updateVarPreview();
+    });
+    varInput.addEventListener('input', () => {
+      autoVar = !varInput.value;
+      updateVarPreview();
+    });
+    updateVarVisibility();
+
+    nameInput.focus();
     modal.querySelector('#sm-new-dec-cancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#sm-new-dec-save').addEventListener('click', async () => {
-      const name = modal.querySelector('#sm-new-dec-name').value.trim();
-      const kind = modal.querySelector('#sm-new-dec-kind').value;
+      const name = nameInput.value.trim();
+      const kind = kindSelect.value;
       const content = modal.querySelector('#sm-new-dec-content').value.trim();
       const weight = modal.querySelector('#sm-new-dec-weight').value;
       if (!name) { toast('Name required'); return; }
+      const body = { name, kind, content, weight, scope: 'global' };
+      if (kind === 'token') {
+        body.variable = varInput.value.trim() || slugifyName(name);
+      }
       try {
         await fetch('/api/decisions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, kind, content, weight, scope: 'global' }),
+          body: JSON.stringify(body),
         });
         modal.remove();
         loadDecisionsTab();
@@ -922,8 +959,13 @@
       });
 
       card.querySelector('.sm-comp-delete').addEventListener('click', async () => {
-        if (!confirm(`Delete component "${compName}"?`)) return;
-        await fetch(`/api/partials/${compId}`, { method: 'DELETE' });
+        const res = await fetch(`/api/partials/${compId}`, { method: 'DELETE' });
+        if (res.status === 409) {
+          const data = await res.json();
+          const pageList = data.usage.map(u => `/${u.slug}`).join(', ');
+          if (!confirm(`"${compName}" is used on ${data.usage.length} page(s): ${pageList}\n\nDelete anyway? Its HTML will be inlined back into those pages.`)) return;
+          await fetch(`/api/partials/${compId}?force=true`, { method: 'DELETE' });
+        }
         card.remove();
         toast('Component deleted');
       });

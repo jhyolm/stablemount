@@ -40,66 +40,101 @@ function scopeApplies(decision, pageSlug, collectionSlug) {
   return true;
 }
 
-function buildConstraints(pageSlug = null, collectionSlug = null) {
+function buildArchitecturePrompt(pageSlug = null, collectionSlug = null) {
   const allDecisions = listDecisions();
   const decisions = allDecisions.filter(d => scopeApplies(d, pageSlug, collectionSlug));
   const partials = listPartials();
-  let hasTokens = false;
-  let hasPartials = false;
 
-  const rules = [];
-  const guides = [];
-
-  const tokens = decisions.filter(d => d.kind === 'token');
-  if (tokens.length) hasTokens = true;
-
-  for (const d of decisions) {
-    const prefix = d.kind === 'token' ? `[token] ${d.name}: ${d.content}`
-      : d.kind === 'instruction' ? `[instruction] ${d.name}: ${d.content}`
-      : d.kind === 'asset' ? `[asset] ${d.name}: reference ${d.content}`
-      : `${d.name}: ${d.content}`;
-    if (d.weight === 'guide') guides.push(prefix);
-    else rules.push(prefix);
-  }
-
-  let out = '';
-  if (rules.length) {
-    out += 'SITE RULES (must follow exactly — do NOT re-propose these):\n';
-    for (const r of rules) out += `- ${r}\n`;
-    out += '\n';
-  }
-  if (guides.length) {
-    out += 'SITE GUIDELINES (follow unless you have good reason not to — do NOT re-propose these):\n';
-    for (const g of guides) out += `- ${g}\n`;
-    out += '\n';
-  }
-
+  const tokens = decisions.filter(d => d.kind === 'token' && d.variable);
+  const instructions = decisions.filter(d => d.kind === 'instruction');
+  const otherDecisions = decisions.filter(d => d.kind !== 'token' && d.kind !== 'instruction');
   const actualPartials = partials.filter(p => !p.isPattern);
   const patterns = partials.filter(p => p.isPattern);
 
+  let tokenBlock = '';
+  if (tokens.length) {
+    tokenBlock = 'Available tokens (server-injected as CSS variables — use these, NEVER redefine them):\n';
+    for (const t of tokens) {
+      tokenBlock += `    var(--${t.variable}): ${t.content}${t.weight === 'guide' ? ' (preferred)' : ''}\n`;
+    }
+  } else {
+    tokenBlock = 'No tokens defined yet. When generating the first page, propose core tokens (colors, fonts, spacing) as decisions with kind:"token".';
+  }
+
+  let instructionBlock = '';
+  const ruleInstructions = instructions.filter(d => d.weight === 'rule');
+  const guideInstructions = instructions.filter(d => d.weight === 'guide');
+  if (ruleInstructions.length) {
+    instructionBlock += 'Instruction rules (MUST follow):\n';
+    for (const d of ruleInstructions) instructionBlock += `  - ${d.name}: ${d.content}\n`;
+  }
+  if (guideInstructions.length) {
+    instructionBlock += 'Instruction guides (preferred):\n';
+    for (const d of guideInstructions) instructionBlock += `  - ${d.name}: ${d.content}\n`;
+  }
+  if (otherDecisions.length) {
+    instructionBlock += 'Other decisions:\n';
+    for (const d of otherDecisions) instructionBlock += `  - [${d.kind}] ${d.name}: ${d.content}\n`;
+  }
+
+  let partialBlock = '';
   if (actualPartials.length) {
-    hasPartials = true;
-    out += 'EXISTING PARTIALS (use <!-- @partial:name --> directives for these — do NOT re-create them):\n';
+    partialBlock += 'EXISTING PARTIALS (use <!-- @partial:name --> directives — do NOT recreate):\n';
     for (const p of actualPartials) {
       const html = getPartialHTML(p.id);
-      if (html) out += `--- ${p.name} ---\n${html}\n\n`;
-      else out += `- ${p.name}\n`;
+      if (html) partialBlock += `--- ${p.name} ---\n${html}\n\n`;
+      else partialBlock += `- ${p.name}\n`;
     }
-    out += '\n';
   }
-
   if (patterns.length) {
-    out += 'PATTERN COMPONENTS (reference patterns — use these as templates when generating similar elements):\n';
+    partialBlock += 'PATTERN COMPONENTS (templates for generating similar elements):\n';
     for (const p of patterns) {
       const html = getPartialHTML(p.id);
-      const weightLabel = p.weight === 'rule' ? 'use exactly' : 'preferred, can deviate';
-      if (html) out += `--- ${p.name} (${weightLabel}) ---\n${html}\n\n`;
-      else out += `- ${p.name} (${weightLabel})\n`;
+      const label = p.weight === 'rule' ? 'use exactly' : 'preferred, can deviate';
+      if (html) partialBlock += `--- ${p.name} (${label}) ---\n${html}\n\n`;
+      else partialBlock += `- ${p.name} (${label})\n`;
     }
-    out += '\n';
   }
 
-  return { text: out, hasTokens, hasPartials: hasPartials || patterns.length > 0 };
+  return {
+    hasTokens: tokens.length > 0,
+    hasPartials: actualPartials.length > 0 || patterns.length > 0,
+    text: `STABLEMOUNT CONTENT MODEL:
+
+PAGE: A standalone URL route. Full HTML document (<!DOCTYPE> through </html>).
+  /about, /contact, /pricing — each is a page. The unit of navigation.
+
+PARTIAL: A reusable HTML component. NOT a page. NOT a URL.
+  header, footer, hero-card, pricing-table — injected into pages via <!-- @partial:name -->.
+  A partial is HTML + scoped CSS + optional JS, bundled together.
+
+DECISION: A site-wide design constraint. Two kinds:
+  - Token (kind: "token"): A CSS custom property. The server injects these automatically at browse time as :root variables.
+    You NEVER define :root {}. You NEVER hardcode token values. You ALWAYS use var(--variable-name).
+    ${tokenBlock}
+  - Instruction (kind: "instruction"): Prose guidance you must follow. No runtime CSS effect.
+    ${instructionBlock || '(none yet)'}
+
+COLLECTION: A typed data set with schema, entries, and listing/detail templates.
+  Blog posts, products, team members — embedded in pages via <!-- @collection:slug -->.
+
+FUNCTION: Sandboxed server-side logic at /api/fn/{name}.
+
+RELATIONSHIPS:
+  Pages REFERENCE partials (via <!-- @partial:name --> directive comments).
+  Pages USE tokens (via CSS var(--variable-name)). The server auto-injects token values.
+  Pages EMBED collections (via <!-- @collection:slug --> directive comments).
+  Partials USE tokens (via CSS var(--variable-name)).
+  The server resolves all directives and injects all tokens at browse time.
+
+NEVER:
+  - Create a page when asked for a component/partial/card/template/section
+  - Inline partial markup in a page (use the <!-- @partial:name --> directive)
+  - Define :root {} or hardcode token values — the server injects tokens automatically
+  - Put partial CSS in the page <style> — partials bundle their own CSS
+
+${partialBlock}`
+  };
 }
 
 function buildSiteContext() {
@@ -172,28 +207,12 @@ function parseGenerationJSON(raw) {
   throw new Error('AI response could not be parsed. Try generating again.');
 }
 
-function buildTokenCSS(pageSlug = null, collectionSlug = null) {
-  const tokens = listDecisions().filter(d => d.kind === 'token' && scopeApplies(d, pageSlug, collectionSlug));
-  if (!tokens.length) return '';
-  let css = ':root {\n';
-  for (const t of tokens) {
-    const varName = '--' + t.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    css += `  ${varName}: ${t.content};\n`;
-  }
-  css += '}\n';
-  return css;
-}
-
 export async function generatePage(intent, pageSlug = null) {
-  const constraints = buildConstraints(pageSlug, null);
-  const tokenCSS = buildTokenCSS(pageSlug, null);
+  const arch = buildArchitecturePrompt(pageSlug, null);
 
   const systemPrompt = `You are a web designer building pages for Stablemount.
 
-ARCHITECTURE:
-- Flat-file storage: no database. Content lives in content/ (pages, partials, collections, decisions, site.json).
-- Pages are .html files on disk. Partials live in content/partials/.
-- The server resolves <!-- @partial:name --> and <!-- @collection:slug --> at browse time. Pages store directives only — never inline partial markup.
+${arch.text}
 
 You MUST return a JSON object with this exact structure:
 {
@@ -203,7 +222,7 @@ You MUST return a JSON object with this exact structure:
 }
 
 DESIGN:
-${constraints.hasTokens
+${arch.hasTokens
   ? '- An existing design direction is established. Follow it. Strengthen it where you can, but stay consistent.'
   : '- This is an early page — you are setting the design direction for the entire site. Choose a strong, distinctive style that is effective for this type of site. Own it. This becomes the foundation everything else builds on.'}
 - Use IMAGES. Use https://loremflickr.com/{width}/{height}/{keyword},{keyword} for contextual stock photos. Comma-separate 2-3 specific keywords that match the page topic. Examples:
@@ -225,20 +244,19 @@ PAGE HTML RULES:
 4. Use <!-- @partial:name --> for partial components (existing or proposed).
 5. Use <!-- @collection:slug limit=3 sort=created order=desc --> ... <!-- @/collection:slug --> to embed collection items. Template inside uses data-each-entry and {{field}} placeholders.
 6. All CSS in a <style> tag in <head>. You may link ONE Google Fonts pairing.
-7. Use CSS custom properties for design tokens.
-${tokenCSS ? `\nEXISTING TOKEN CSS (include in your <style>):\n${tokenCSS}` : ''}
+7. Use CSS custom properties via var(--token-name). Do NOT define :root {} — the server injects tokens automatically.
 
 RULES FOR DECISIONS:
-${constraints.hasTokens
+${arch.hasTokens
   ? '- Design tokens already exist. Do NOT propose tokens that duplicate existing ones. Only propose NEW tokens if you used values not already covered.'
   : '- No design tokens exist yet. You MUST propose the core tokens you used: primary color, secondary color, accent color, text color, background color, font family, heading font (if different), border radius, and any other values you chose. These become the site\'s design system.'}
-- Each decision: { "name": "Human Label", "kind": "token|instruction", "weight": "rule|guide", "scope": "global", "content": "the value" }
-- For tokens: content is the CSS value (#hex, font name, px/rem value, etc.)
-- For instructions: content is prose guidance the AI should follow on future pages
+- Each decision: { "name": "Human Label", "kind": "token|instruction", "variable": "css-var-name", "weight": "rule|guide", "scope": "global", "content": "the value" }
+- For tokens: content is the CSS value (#hex, font name, px/rem value, etc.). "variable" is the CSS variable name WITHOUT the -- prefix (e.g. "color-primary" becomes var(--color-primary)).
+- For instructions: content is prose guidance the AI should follow on future pages. Omit "variable".
 - Only propose decisions that genuinely constrain future generation. Don't propose trivial or obvious things.
 
 RULES FOR PARTIALS:
-${constraints.hasPartials
+${arch.hasPartials
   ? '- Partials already exist. Use <!-- @partial:name --> directives for them. Only propose NEW partials if you created a distinct reusable pattern.'
   : '- No partials exist yet. You MUST create a header and footer as partials. The page HTML should use <!-- @partial:header --> and <!-- @partial:footer --> directives for them.'}
 - Each partial: { "name": "lowercase-kebab", "html": "<bundled partial>", "mode": "global|injectable" }
@@ -264,7 +282,7 @@ EFFICIENCY: Be direct. Do not overthink. Generate confidently and move fast.
 - The response MUST complete within token limits. Prioritize finishing the HTML.`;
 
   const siteContext = buildSiteContext();
-  const userPrompt = `${siteContext}${constraints.text ? `EXISTING SITE CONSTRAINTS:\n${constraints.text}\n` : 'This is the FIRST page for a brand new site. No decisions or components exist yet. Bootstrap the design system.\n\n'}Generate a complete page for this intent:\n\n${intent}`;
+  const userPrompt = `${siteContext}${!arch.hasTokens && !arch.hasPartials ? 'This is the FIRST page for a brand new site. No decisions or components exist yet. Bootstrap the design system.\n\n' : ''}Generate a complete page for this intent:\n\n${intent}`;
 
   const model = getModel('generate');
   const response = await getClient().messages.create({
@@ -390,8 +408,10 @@ function trimHistory(history) {
 }
 
 export async function chatSite(message, history = [], pageHTML = null, pageSlug = null) {
-  const pageRef = pageSlug ? `pages/${pageSlug}.html` : 'any page';
+  const arch = buildArchitecturePrompt(pageSlug, null);
   const rules = `You are Stablemount's AI assistant. You can modify files and create/delete content.
+
+${arch.text}
 
 RESPONSE FORMAT (JSON only, no markdown fences):
 {
@@ -420,10 +440,6 @@ ${pageSlug ? `- pages/${pageSlug}.html — the current page being edited\n` : ''
 - decisions.json — design tokens and instructions
 - site.json — site name and settings
 
-PARTIAL PARADIGM:
-- Pages use <!-- @partial:name --> directives. The server injects partial content at browse time. Never put partial markup inline in pages.
-- Global partials: same content everywhere (header, footer). Injectable partials: accept slot data per page (e.g. accordion with page-specific FAQs).
-
 AVAILABLE ACTIONS:
 - createCollection: { name, slug, schema: [{name, type, required}] } — types: text, richtext, number, date, image, url, boolean
 - createEntry: { collection (slug), slug, data: {field: value} }
@@ -436,14 +452,19 @@ AVAILABLE ACTIONS:
 - createFunction: { name, code } — creates a sandboxed server function at /api/fn/{name}
 - deleteFunction: { name }
 
-CRITICAL — PAGES vs PARTIALS:
-- A PAGE is a standalone URL route (/, /about, /contact). Use createPage for full navigable pages.
-- A PARTIAL is a reusable HTML component (header, footer, card, hero-section). Use createPartial for components.
-- NEVER create a page when the user asks for a "component", "partial", "pattern", "card", "section template", or reusable element.
-- If the user asks you to "create a component" or "make a partial", use createPartial — NOT createPage.
-- Partials are injected into pages via <!-- @partial:name --> directives. They are not pages.
-
 Actions run BEFORE changes, so you can create a collection and then patch a page to reference it.
+
+CRITICAL — EXTRACTING PARTIALS FROM PAGES:
+When the user asks you to turn an existing section/element into a partial:
+  1. Use createPartial with the HTML extracted from the page
+  2. ALSO emit a change that replaces the original HTML in the page with <!-- @partial:name -->
+  You MUST do BOTH steps. Creating the partial without replacing the page markup leaves duplicate content.
+  The "old" value in the change should be the exact HTML you extracted. The "new" value is the directive comment.
+
+TOKEN RULES FOR CHANGES:
+- When editing page or partial CSS, ALWAYS use var(--token-name) for any value that has a token decision.
+- NEVER write :root {} blocks — the server injects tokens automatically.
+- NEVER hardcode a value that a token already covers (e.g. don't write color: #ffffff if var(--color-primary) is #ffffff).
 
 COLLECTION DIRECTIVES (for embedding collection items on pages):
 Dynamic: <!-- @collection:slug limit=3 sort=created order=desc -->
@@ -540,14 +561,15 @@ export async function chatModifyPage(pageHTML, message, history = [], pageSlug =
 }
 
 export async function generateCollectionTemplates(collection) {
-  const constraints = buildConstraints();
-  const tokenCSS = buildTokenCSS();
+  const arch = buildArchitecturePrompt();
 
   const schemaDesc = collection.schema.map(f =>
     `- ${f.name} (${f.type}${f.required ? ', required' : ''})`
   ).join('\n');
 
   const systemPrompt = `You are a web designer building collection templates for Stablemount.
+
+${arch.text}
 
 You MUST return a JSON object with this exact structure:
 {
@@ -579,11 +601,9 @@ DETAIL PAGE:
 BOTH PAGES:
 - Add data-content attributes to editable text elements.
 - Add data-section attributes to logical sections.
-- All CSS in a <style> tag. Use CSS custom properties.
+- All CSS in a <style> tag. Use CSS custom properties via var(--token-name). Do NOT define :root {} — the server injects tokens automatically.
 - Responsive design.
 - Match the site's existing design direction.
-${tokenCSS ? `\nEXISTING TOKEN CSS:\n${tokenCSS}` : ''}
-${constraints.text ? `\nSITE CONSTRAINTS:\n${constraints.text}` : ''}
 ${buildSiteContext()}
 EFFICIENCY: Be concise. Both templates together must fit within token limits. Keep CSS lean.
 Return ONLY valid JSON. No markdown, no code fences.`;

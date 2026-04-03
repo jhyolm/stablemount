@@ -406,7 +406,7 @@ function renderDecisions() {
     const isColor = d.kind === 'token' && /^#[0-9a-f]{3,8}$/i.test(d.content);
     const scopeLabel = d.scope === 'global' ? 'global' : d.scope;
     h += `<tr>
-      <td><strong>${esc(d.name)}</strong></td>
+      <td><strong>${esc(d.name)}</strong>${d.variable ? `<br><code style="font-size:11px;color:#888">var(--${esc(d.variable)})</code>` : ''}</td>
       <td><span class="tag tag-${d.kind}">${d.kind}</span></td>
       <td><span class="tag tag-${d.weight}">${d.weight}</span></td>
       <td>${esc(scopeLabel)}</td>
@@ -454,6 +454,11 @@ window.showDecisionModal = function(editId) {
             <option value="guide" ${existing?.weight==='guide'?'selected':''}>Guide</option>
           </select></div>
       </div>
+      <div class="form-group" id="dec-variable-group" style="display:${(existing?.kind || 'token')==='token'?'block':'none'}">
+        <label>CSS Variable</label>
+        <input name="variable" id="dec-variable" value="${esc(existing?.variable)}" placeholder="auto-generated from name">
+        <span id="dec-var-preview" style="font-size:12px;color:#888">${existing?.variable ? `var(--${esc(existing.variable)})` : ''}</span>
+      </div>
       <div class="form-row">
         <div class="form-group"><label>Scope</label>
           <select name="scope_base" id="dec-scope-base">
@@ -478,6 +483,28 @@ window.showDecisionModal = function(editId) {
   const scopeTargetGroup = document.getElementById('dec-scope-target-group');
   const scopeTargetLabel = document.getElementById('dec-scope-target-label');
   const contentArea = document.getElementById('dec-content-area');
+  const varGroup = document.getElementById('dec-variable-group');
+  const varInput = document.getElementById('dec-variable');
+  const varPreview = document.getElementById('dec-var-preview');
+  const nameInput = document.querySelector('#dec-form input[name="name"]');
+  let autoVar = !existing?.variable;
+
+  function slugifyName(n) { return n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+
+  nameInput.addEventListener('input', () => {
+    if (autoVar && kindSelect.value === 'token') {
+      varInput.value = slugifyName(nameInput.value);
+    }
+    updateVarPreview();
+  });
+  varInput.addEventListener('input', () => {
+    autoVar = !varInput.value;
+    updateVarPreview();
+  });
+  function updateVarPreview() {
+    const v = varInput.value || slugifyName(nameInput.value);
+    varPreview.textContent = v ? `var(--${v})` : '';
+  }
 
   function renderContentEditor(kind, value) {
     if (kind === 'token') {
@@ -505,6 +532,7 @@ window.showDecisionModal = function(editId) {
   renderContentEditor(existing?.kind || 'token', existing?.content || '');
 
   kindSelect.addEventListener('change', () => {
+    varGroup.style.display = kindSelect.value === 'token' ? 'block' : 'none';
     renderContentEditor(kindSelect.value, '');
   });
 
@@ -529,6 +557,9 @@ window.showDecisionModal = function(editId) {
       name: f.name.value, kind: f.kind.value,
       weight: f.weight.value, scope, content: f.content.value,
     };
+    if (f.kind.value === 'token') {
+      data.variable = f.variable.value.trim() || slugifyName(f.name.value);
+    }
     if (existing) await api('PUT', '/decisions/' + editId, data);
     else await api('POST', '/decisions', data);
     hideModal();
@@ -636,8 +667,13 @@ window.showPartialModal = async function(editId) {
 };
 
 window.deletePartialAction = async function(id) {
-  if (!confirm('Delete this partial?')) return;
-  await api('DELETE', '/partials/' + id);
+  const res = await fetch('/api/partials/' + id, { method: 'DELETE' });
+  if (res.status === 409) {
+    const data = await res.json();
+    const pageList = data.usage.map(u => `  - /${u.slug} ("${u.title}")`).join('\n');
+    if (!confirm(`This partial is used on ${data.usage.length} page(s):\n${pageList}\n\nDelete anyway? Its HTML will be inlined back into those pages.`)) return;
+    await fetch('/api/partials/' + id + '?force=true', { method: 'DELETE' });
+  }
   await load();
 };
 

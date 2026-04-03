@@ -314,6 +314,13 @@
   white-space: nowrap;
 }
 
+.sm-dec-var {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: monospace;
+  opacity: 0.8;
+}
+
 .sm-dec-kind {
   font-size: 9px;
   font-weight: 600;

@@ -266,10 +266,13 @@ export async function openComponentEditor({ partial, onSave, onClose }) {
 export function renderDecisionRow(d, opts = {}) {
   const { compact = false } = opts;
   const isColor = d.kind === 'token' && /^(#[0-9a-f]{3,8}|rgb|hsl)/i.test(d.content);
-  return `<div class="sm-dec-row" data-dec-id="${esc(d.id)}">
+  const varAttr = d.variable ? ` data-variable="${esc(d.variable)}"` : '';
+  const varHint = d.variable ? `<span class="sm-dec-var">var(--${esc(d.variable)})</span>` : '';
+  return `<div class="sm-dec-row" data-dec-id="${esc(d.id)}"${varAttr}>
     <div class="sm-dec-main">
       ${isColor ? `<span class="sm-dec-swatch" style="background:${esc(d.content)}"></span>` : ''}
       <span class="sm-dec-name">${esc(d.name)}</span>
+      ${varHint}
       <span class="sm-dec-kind">${esc(d.kind)}</span>
       <span class="sm-dec-weight">${esc(d.weight)}</span>
     </div>
