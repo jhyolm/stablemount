@@ -569,12 +569,33 @@ const server = createServer(async (req, res) => {
               createPage({ title: a.title, slug: a.slug, intent: a.intent || '' });
               const finalHTML = await localizeImages(genResult.html);
               savePageHTML(a.slug, finalHTML);
+              broadcast('pages');
               actionResults.push({ action: 'createPage', slug: a.slug });
+              break;
+            }
+            case 'createPartial': {
+              if (a.name) {
+                createPartial({
+                  name: a.name,
+                  html: a.html || '',
+                  mode: a.mode || 'global',
+                  weight: a.weight || 'rule',
+                  scope: a.scope || 'global',
+                  isPattern: !!a.isPattern,
+                });
+                broadcast('partials');
+                actionResults.push({ action: 'createPartial', name: a.name });
+              }
+              break;
+            }
+            case 'deletePartial': {
+              const partial = getPartialByName(a.name);
+              if (partial) { deletePartial(partial.id); broadcast('partials'); actionResults.push({ action: 'deletePartial', name: a.name }); }
               break;
             }
             case 'deletePage': {
               const pg = getPageBySlug(a.slug);
-              if (pg) { deletePage(pg.id); actionResults.push({ action: 'deletePage', slug: a.slug }); }
+              if (pg) { deletePage(pg.id); broadcast('pages'); actionResults.push({ action: 'deletePage', slug: a.slug }); }
               break;
             }
             case 'deleteCollection': {

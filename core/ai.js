@@ -403,6 +403,8 @@ RESPONSE FORMAT (JSON only, no markdown fences):
     { "action": "createCollection", "name": "Blog Posts", "slug": "blog", "schema": [{"name":"title","type":"text","required":true}] },
     { "action": "createEntry", "collection": "blog", "slug": "hello-world", "data": {"title":"Hello World"} },
     { "action": "createPage", "title": "About", "slug": "about", "intent": "An about page for the company" },
+    { "action": "createPartial", "name": "hero-card", "html": "<div class='hero-card'>...</div><style>.hero-card{...}</style>", "mode": "global", "isPattern": false },
+    { "action": "deletePartial", "name": "old-partial" },
     { "action": "deletePage", "slug": "old-page" },
     { "action": "deleteCollection", "slug": "old-collection" },
     { "action": "deleteEntry", "collection": "blog", "slug": "old-post" }
@@ -426,11 +428,20 @@ AVAILABLE ACTIONS:
 - createCollection: { name, slug, schema: [{name, type, required}] } — types: text, richtext, number, date, image, url, boolean
 - createEntry: { collection (slug), slug, data: {field: value} }
 - createPage: { title, slug, intent } — AI generates the page HTML from the intent
+- createPartial: { name, html, mode, isPattern } — creates a reusable component (partial or pattern)
 - deletePage: { slug }
+- deletePartial: { name }
 - deleteCollection: { slug }
 - deleteEntry: { collection (slug), slug }
 - createFunction: { name, code } — creates a sandboxed server function at /api/fn/{name}
 - deleteFunction: { name }
+
+CRITICAL — PAGES vs PARTIALS:
+- A PAGE is a standalone URL route (/, /about, /contact). Use createPage for full navigable pages.
+- A PARTIAL is a reusable HTML component (header, footer, card, hero-section). Use createPartial for components.
+- NEVER create a page when the user asks for a "component", "partial", "pattern", "card", "section template", or reusable element.
+- If the user asks you to "create a component" or "make a partial", use createPartial — NOT createPage.
+- Partials are injected into pages via <!-- @partial:name --> directives. They are not pages.
 
 Actions run BEFORE changes, so you can create a collection and then patch a page to reference it.
 
