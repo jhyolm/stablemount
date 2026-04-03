@@ -1369,7 +1369,7 @@ function initSettings() {
     };
   }
 
-  if (state.user?.role === 'admin') loadUsersList();
+  if (state.user?.role === 'admin' || !state.user) loadUsersList();
 }
 
 async function loadUsersList() {
