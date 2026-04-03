@@ -45,6 +45,7 @@ async function load() {
       fetch('/api/auth/me').then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
     renderUserBadge();
+    renderSetupBanner();
     render();
   } catch (err) {
     el.innerHTML = `<div class="empty-state" role="alert">
@@ -1263,6 +1264,19 @@ function hideLoading() {
 
   loadHistory();
 })();
+
+// ── Setup Banner ──
+
+function renderSetupBanner() {
+  const existing = document.getElementById('setup-banner');
+  if (existing) existing.remove();
+  if (state.user) return;
+  const banner = document.createElement('div');
+  banner.id = 'setup-banner';
+  banner.className = 'setup-banner';
+  banner.innerHTML = `<strong>No account set up.</strong> Your dashboard is open to anyone on this network. <a href="/login">Create an admin account</a> to secure it.`;
+  document.querySelector('.content')?.prepend(banner);
+}
 
 // ── User Badge ──
 

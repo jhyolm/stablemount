@@ -208,7 +208,7 @@ const server = createServer(async (req, res) => {
       const user = getRequestUser(req);
       return send(res, 200, {
         setup: hasUsers(),
-        authenticated: hasUsers() ? !!user : true,
+        authenticated: !!user,
         user: user || null,
       });
     }
