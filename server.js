@@ -107,11 +107,12 @@ async function jsonBody(req) {
 
 function injectOverlay(html, slug, pageTitle) {
   const config = `<script data-sm-overlay>window.__SM__={slug:${JSON.stringify(slug)},title:${JSON.stringify(pageTitle || slug)}};</script>`;
-  const css = '<link rel="stylesheet" href="/overlay/overlay.css" data-sm-overlay>';
-  const js = '<script src="/overlay/overlay.js" data-sm-overlay></script>';
+  const css = '<link rel="stylesheet" href="/shared/ui.css" data-sm-overlay>\n<link rel="stylesheet" href="/overlay/overlay.css" data-sm-overlay>';
+  const uiLoader = '<script type="module" data-sm-overlay>import * as ui from "/shared/ui.js"; window.__SM_UI__ = ui;</script>';
+  const js = '<script src="/overlay/overlay.js" data-sm-overlay defer></script>';
   const lr = '<script data-sm-overlay>(() => { let r = false; const e = new EventSource("/api/livereload"); e.onopen = () => { if (r) location.reload(); }; e.onerror = () => { r = true; }; })();</script>';
   html = html.replace('</head>', `${css}\n${config}\n</head>`);
-  html = html.replace('</body>', `${js}\n${lr}\n</body>`);
+  html = html.replace('</body>', `${uiLoader}\n${js}\n${lr}\n</body>`);
   return html;
 }
 
@@ -805,6 +806,14 @@ const server = createServer(async (req, res) => {
     if (path.startsWith('/dashboard/')) {
       try {
         const filePath = safePath(join(__dirname, 'core', 'dashboard'), path.slice('/dashboard/'.length));
+        return serveFile(res, filePath);
+      } catch { return send(res, 403, '{"error":"Forbidden"}'); }
+    }
+
+    // ── Shared static files ──
+    if (path.startsWith('/shared/')) {
+      try {
+        const filePath = safePath(join(__dirname, 'core', 'shared'), path.slice('/shared/'.length));
         return serveFile(res, filePath);
       } catch { return send(res, 403, '{"error":"Forbidden"}'); }
     }

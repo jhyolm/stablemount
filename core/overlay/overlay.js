@@ -661,6 +661,15 @@
     else if (sitePanelTab === 'media') loadMediaTab();
   }
 
+  // ── Shared UI access ──
+
+  const UI = window.__SM_UI__ || {};
+
+  function debounce(fn, ms) {
+    let timer;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+  }
+
   // ── Decisions Tab ──
 
   async function loadDecisionsTab() {
@@ -694,52 +703,59 @@
     for (const [kind, items] of Object.entries(grouped)) {
       html += `<div class="sm-decision-group"><div class="sm-decision-group-label">${esc(kind)}</div>`;
       for (const d of items) {
-        const isColor = d.kind === 'token' && /^color-|^#|^rgb|^hsl/.test(d.content);
-        html += `<div class="sm-decision-row" data-decision-id="${d.id}">
-          <div class="sm-decision-main">
-            ${isColor ? `<span class="sm-decision-swatch" style="background:${esc(d.content)}"></span>` : ''}
-            <span class="sm-decision-name">${esc(d.name)}</span>
-            <span class="sm-decision-weight">${esc(d.weight)}</span>
-          </div>
-          <input class="sm-decision-input" value="${esc(d.content)}" data-field="content">
-          <div class="sm-decision-meta">
-            <select class="sm-decision-select" data-field="weight">
-              <option value="rule"${d.weight === 'rule' ? ' selected' : ''}>rule</option>
-              <option value="guide"${d.weight === 'guide' ? ' selected' : ''}>guide</option>
-              <option value="absolute"${d.weight === 'absolute' ? ' selected' : ''}>absolute</option>
-            </select>
-            <select class="sm-decision-select" data-field="scope">
-              <option value="global"${d.scope === 'global' ? ' selected' : ''}>global</option>
-              ${slug ? `<option value="${slug}"${d.scope === slug ? ' selected' : ''}>${slug}</option>` : ''}
-            </select>
-            <button class="sm-decision-delete" title="Delete">&times;</button>
-          </div>
-        </div>`;
+        html += (UI.renderDecisionRow || renderDecisionRowFallback)(d);
       }
       html += '</div>';
     }
     siteBody.innerHTML = html;
 
     document.getElementById('sm-add-decision').addEventListener('click', showAddDecision);
+    wireDecisionRows(siteBody);
+  }
 
-    siteBody.querySelectorAll('.sm-decision-row').forEach(row => {
-      const id = row.dataset.decisionId;
+  function renderDecisionRowFallback(d) {
+    const isColor = d.kind === 'token' && /^(#[0-9a-f]{3,8}|rgb|hsl)/i.test(d.content);
+    return `<div class="sm-dec-row" data-dec-id="${esc(d.id)}">
+      <div class="sm-dec-main">
+        ${isColor ? `<span class="sm-dec-swatch" style="background:${esc(d.content)}"></span>` : ''}
+        <span class="sm-dec-name">${esc(d.name)}</span>
+        <span class="sm-dec-kind">${esc(d.kind)}</span>
+        <span class="sm-dec-weight">${esc(d.weight)}</span>
+      </div>
+      <input class="sm-dec-input" value="${esc(d.content)}" data-field="content">
+      <div class="sm-dec-meta">
+        <select class="sm-dec-select" data-field="weight">
+          <option value="rule"${d.weight === 'rule' ? ' selected' : ''}>rule</option>
+          <option value="guide"${d.weight === 'guide' ? ' selected' : ''}>guide</option>
+          <option value="absolute"${d.weight === 'absolute' ? ' selected' : ''}>absolute</option>
+        </select>
+        <select class="sm-dec-select" data-field="scope">
+          <option value="global"${d.scope === 'global' ? ' selected' : ''}>global</option>
+        </select>
+        <button class="sm-dec-delete" title="Delete">&times;</button>
+      </div>
+    </div>`;
+  }
 
-      row.querySelector('.sm-decision-input').addEventListener('change', async (e) => {
+  function wireDecisionRows(container) {
+    container.querySelectorAll('.sm-dec-row').forEach(row => {
+      const id = row.dataset.decId;
+
+      const input = row.querySelector('.sm-dec-input');
+      if (input) input.addEventListener('change', async (e) => {
         const val = e.target.value;
         await saveDecision(id, { content: val });
-        const swatch = row.querySelector('.sm-decision-swatch');
+        const swatch = row.querySelector('.sm-dec-swatch');
         if (swatch) swatch.style.background = val;
-        applyDecisionLive(row.querySelector('.sm-decision-name').textContent, val);
+        applyDecisionLive(row.querySelector('.sm-dec-name').textContent, val);
       });
 
-      row.querySelectorAll('.sm-decision-select').forEach(sel => {
-        sel.addEventListener('change', () => {
-          saveDecision(id, { [sel.dataset.field]: sel.value });
-        });
+      row.querySelectorAll('.sm-dec-select').forEach(sel => {
+        sel.addEventListener('change', () => saveDecision(id, { [sel.dataset.field]: sel.value }));
       });
 
-      row.querySelector('.sm-decision-delete').addEventListener('click', async () => {
+      const del = row.querySelector('.sm-dec-delete');
+      if (del) del.addEventListener('click', async () => {
         await fetch(`/api/decisions/${id}`, { method: 'DELETE' });
         row.remove();
         toast('Decision deleted');
@@ -755,21 +771,12 @@
         body: JSON.stringify(updates),
       });
       toast('Decision saved');
-    } catch {
-      toast('Save failed');
-    }
+    } catch { toast('Save failed'); }
   }
 
   function applyDecisionLive(name, value) {
     if (!name.startsWith('color-') && !name.startsWith('font-')) return;
-    const prop = '--sm-' + name;
-    document.documentElement.style.setProperty(prop, value);
-
-    if (name.startsWith('color-')) {
-      document.querySelectorAll('style:not([data-sm-overlay])').forEach(s => {
-        if (s.textContent.includes(prop)) return;
-      });
-    }
+    document.documentElement.style.setProperty('--sm-' + name, value);
   }
 
   function showAddDecision() {
@@ -782,8 +789,8 @@
         <label>Name<input type="text" id="sm-new-dec-name" placeholder="e.g. color-primary"></label>
         <label>Kind<select id="sm-new-dec-kind">
           <option value="token">token</option>
-          <option value="rule">rule</option>
-          <option value="constraint">constraint</option>
+          <option value="instruction">instruction</option>
+          <option value="asset">asset</option>
         </select></label>
         <label>Content<input type="text" id="sm-new-dec-content" placeholder="e.g. #3b82f6"></label>
         <label>Weight<select id="sm-new-dec-weight">
@@ -798,7 +805,6 @@
       </div>`;
     document.body.appendChild(modal);
     modal.querySelector('#sm-new-dec-name').focus();
-
     modal.querySelector('#sm-new-dec-cancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#sm-new-dec-save').addEventListener('click', async () => {
       const name = modal.querySelector('#sm-new-dec-name').value.trim();
@@ -820,11 +826,6 @@
   }
 
   // ── Components Tab ──
-
-  function debounce(fn, ms) {
-    let timer;
-    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
-  }
 
   function getPagePartialSlugs() {
     const slugs = new Set();
@@ -854,70 +855,30 @@
       return;
     }
 
-    let siteCSS = '';
-    try {
-      const cssRes = await fetch(`/api/pages/${slug}/html`);
-      if (cssRes.ok) {
-        const html = await cssRes.text();
-        const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi);
-        if (styleMatch) siteCSS = styleMatch.map(s => s.replace(/<\/?style[^>]*>/gi, '')).join('\n');
-      }
-    } catch {}
+    const siteCSS = await (UI.fetchSiteCSS || (async () => ''))();
 
     let html = '<div class="sm-component-grid">';
     for (const p of partials) {
       const isUsed = usedOnPage.has(p.slug);
-      html += `<div class="sm-component-card${isUsed ? ' sm-component-used' : ''}" data-comp-slug="${esc(p.slug)}">
-        <div class="sm-component-card-header">
-          <span class="sm-component-card-name">${esc(p.name || p.slug)}</span>
-          ${isUsed ? '<span class="sm-component-badge-used">ON PAGE</span>' : ''}
-          ${p.isPattern ? '<span class="sm-component-badge-pattern">PATTERN</span>' : ''}
-        </div>
-        <div class="sm-component-preview" data-comp-preview="${esc(p.slug)}"></div>
-        <div class="sm-component-card-actions">
-          <button class="sm-component-btn sm-component-scroll" ${!isUsed ? 'disabled title="Not on this page"' : 'title="Scroll to on page"'}>Find</button>
-          <button class="sm-component-btn sm-component-edit" title="Edit HTML">Edit</button>
-          <button class="sm-component-btn sm-component-delete" title="Delete">&times;</button>
-        </div>
-      </div>`;
+      html += (UI.renderComponentCard || renderComponentCardFallback)(p, { isUsed, showFind: true });
     }
     html += '</div>';
     siteBody.innerHTML = html;
 
+    const mountPreview = UI.mountComponentPreview || null;
     for (const p of partials) {
       const previewEl = siteBody.querySelector(`[data-comp-preview="${p.slug}"]`);
       if (!previewEl) continue;
-      try {
-        const htmlRes = await fetch(`/api/partials/${p.slug}/html`);
-        if (!htmlRes.ok) continue;
-        const partialHTML = await htmlRes.text();
-        const iframe = document.createElement('iframe');
-        iframe.className = 'sm-component-iframe';
-        iframe.sandbox = 'allow-same-origin';
-        iframe.setAttribute('data-sm-overlay', '');
-        previewEl.appendChild(iframe);
-        const doc = iframe.contentDocument;
-        doc.open();
-        doc.write(`<!DOCTYPE html><html><head><style>
-          body { margin: 0; overflow: hidden; background: #fff; transform-origin: top left; }
-          ${siteCSS}
-        </style></head><body>${partialHTML}</body></html>`);
-        doc.close();
-        requestAnimationFrame(() => {
-          const h = doc.body.scrollHeight;
-          const scale = Math.min(1, 328 / (doc.body.scrollWidth || 328));
-          iframe.style.transform = `scale(${scale})`;
-          iframe.style.height = (h || 100) + 'px';
-          iframe.style.width = (100 / scale) + '%';
-          previewEl.style.height = Math.min(120, h * scale) + 'px';
-        });
-      } catch {}
+      if (mountPreview) {
+        await mountPreview(previewEl, p.slug, siteCSS);
+      }
     }
 
-    siteBody.querySelectorAll('.sm-component-card').forEach(card => {
+    siteBody.querySelectorAll('.sm-comp-card').forEach(card => {
       const compSlug = card.dataset.compSlug;
 
-      card.querySelector('.sm-component-scroll')?.addEventListener('click', () => {
+      const findBtn = card.querySelector('.sm-comp-find');
+      if (findBtn) findBtn.addEventListener('click', () => {
         const el = document.querySelector(`[data-partial="${compSlug}"]`);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -927,7 +888,7 @@
         }
       });
 
-      card.querySelector('.sm-component-edit').addEventListener('click', async () => {
+      card.querySelector('.sm-comp-edit').addEventListener('click', async () => {
         try {
           const res = await fetch(`/api/partials/${compSlug}/html`);
           if (!res.ok) throw new Error('Load failed');
@@ -936,13 +897,32 @@
         } catch (err) { toast('Error: ' + err.message); }
       });
 
-      card.querySelector('.sm-component-delete').addEventListener('click', async () => {
+      card.querySelector('.sm-comp-delete').addEventListener('click', async () => {
         if (!confirm(`Delete component "${compSlug}"?`)) return;
         await fetch(`/api/partials/${compSlug}`, { method: 'DELETE' });
         card.remove();
         toast('Component deleted');
       });
     });
+  }
+
+  function renderComponentCardFallback(p, opts) {
+    return (UI.renderComponentCard || function(partial, o) {
+      const { isUsed = false, showFind = false } = o || {};
+      return `<div class="sm-comp-card${isUsed ? ' sm-comp-card-used' : ''}" data-comp-slug="${esc(partial.slug)}" data-comp-id="${esc(partial.id)}">
+        <div class="sm-comp-card-header">
+          <span class="sm-comp-card-name">${esc(partial.name || partial.slug)}</span>
+          ${isUsed ? '<span class="sm-comp-badge sm-comp-badge-active">ON PAGE</span>' : ''}
+          ${partial.isPattern ? '<span class="sm-comp-badge sm-comp-badge-pattern">PATTERN</span>' : '<span class="sm-comp-badge sm-comp-badge-partial">PARTIAL</span>'}
+        </div>
+        <div class="sm-comp-card-preview" data-comp-preview="${esc(partial.slug)}"></div>
+        <div class="sm-comp-card-actions">
+          ${showFind ? `<button class="sm-comp-btn sm-comp-find" ${!isUsed ? 'disabled' : ''}>Find</button>` : ''}
+          <button class="sm-comp-btn sm-comp-edit">Edit</button>
+          <button class="sm-comp-btn sm-comp-delete">&times;</button>
+        </div>
+      </div>`;
+    })(p, opts);
   }
 
   function showComponentEditor(compSlug, html) {
@@ -959,16 +939,14 @@
         </div>
       </div>`;
     document.body.appendChild(modal);
-    const textarea = modal.querySelector('#sm-comp-editor');
-    textarea.focus();
-
+    modal.querySelector('#sm-comp-editor').focus();
     modal.querySelector('#sm-comp-cancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#sm-comp-save').addEventListener('click', async () => {
       try {
         const res = await fetch(`/api/partials/${compSlug}/html`, {
           method: 'PUT',
           headers: { 'Content-Type': 'text/html' },
-          body: textarea.value,
+          body: modal.querySelector('#sm-comp-editor').value,
         });
         if (!res.ok) throw new Error('Save failed');
         modal.remove();
@@ -1002,19 +980,7 @@
     } else {
       html += '<div class="sm-media-grid">';
       for (const item of media) {
-        const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.path);
-        html += `<div class="sm-media-card" data-media-id="${item.id}" data-media-path="${esc(item.path)}">
-          <div class="sm-media-card-thumb">
-            ${isImage ? `<img src="${esc(item.path)}" loading="lazy">` : `<span class="sm-media-card-icon">${esc(item.path.split('.').pop().toUpperCase())}</span>`}
-          </div>
-          <div class="sm-media-card-info">
-            <span class="sm-media-card-name">${esc(item.originalName || item.path.split('/').pop())}</span>
-          </div>
-          <div class="sm-media-card-actions">
-            <button class="sm-media-copy" title="Copy path">Copy</button>
-            <button class="sm-media-delete" title="Delete">&times;</button>
-          </div>
-        </div>`;
+        html += (UI.renderMediaCard || renderMediaCardFallback)(item);
       }
       html += '</div>';
     }
@@ -1028,7 +994,7 @@
       });
     });
 
-    siteBody.querySelectorAll('.sm-media-card').forEach(card => {
+    siteBody.querySelectorAll('.sm-media-item').forEach(card => {
       card.querySelector('.sm-media-copy').addEventListener('click', (e) => {
         e.stopPropagation();
         const p = card.dataset.mediaPath;
@@ -1043,7 +1009,7 @@
         });
       });
 
-      card.querySelector('.sm-media-delete').addEventListener('click', async (e) => {
+      card.querySelector('.sm-media-del').addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Delete this file?')) return;
         await fetch(`/api/media/${card.dataset.mediaId}`, { method: 'DELETE' });
@@ -1051,6 +1017,21 @@
         toast('Deleted');
       });
     });
+  }
+
+  function renderMediaCardFallback(item) {
+    const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.path) || (item.mimeType || '').startsWith('image/');
+    const name = item.originalName || item.path.split('/').pop();
+    return `<div class="sm-media-item" data-media-id="${esc(item.id)}" data-media-path="${esc(item.path)}">
+      <div class="sm-media-thumb">
+        ${isImage ? `<img src="${esc(item.path)}" loading="lazy">` : `<span class="sm-media-ext">${esc(item.path.split('.').pop().toUpperCase())}</span>`}
+      </div>
+      <div class="sm-media-info"><span class="sm-media-name">${esc(name)}</span></div>
+      <div class="sm-media-actions">
+        <button class="sm-media-copy">Copy</button>
+        <button class="sm-media-del">&times;</button>
+      </div>
+    </div>`;
   }
 
   function addChatMessage(role, text) {
