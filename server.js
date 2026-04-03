@@ -260,12 +260,12 @@ const server = createServer(async (req, res) => {
 
     // ── User management (admin only) ──
     if (path === '/api/users' && method === 'GET') {
-      if (!requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+      if (hasUsers() && !requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
       const users = listUsers().map(({ passwordHash, passwordSalt, ...u }) => u);
       return send(res, 200, users);
     }
     if (path === '/api/users' && method === 'POST') {
-      if (!requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
+      if (hasUsers() && !requireAdmin(req)) return send(res, 403, { error: 'Admin access required' });
       const { username, displayName, password, role } = await jsonBody(req);
       if (!username || username.length < 2) return send(res, 400, { error: 'Username must be at least 2 characters' });
       if (!password || password.length < 6) return send(res, 400, { error: 'Password must be at least 6 characters' });

@@ -1270,7 +1270,7 @@ function hideLoading() {
 
 function setupBannerHTML() {
   if (state.user) return '';
-  return `<div class="setup-banner"><strong>No account set up.</strong> Your dashboard is open to anyone on this network. <a href="/login">Create an admin account</a> to secure it.</div>`;
+  return `<div class="setup-banner"><strong>No users configured.</strong> Anyone on this network can access the dashboard. <a href="#" onclick="event.preventDefault();document.querySelector('[data-view=settings]').click()">Go to Settings</a> to add users.</div>`;
 }
 
 function renderSetupBanner() {}
@@ -1288,39 +1288,41 @@ function renderUserBadge() {
 
 function renderSettings() {
   const isAdmin = state.user && state.user.role === 'admin';
+  const noUsers = !state.user;
 
   let h = '<div class="view-header"><h1>Settings</h1></div>';
-
   h += '<div class="settings-panels">';
 
-  h += `<div class="settings-panel">
-    <h2>Profile</h2>
-    <form id="profile-form">
-      <div class="form-group"><label>Display Name</label>
-        <input name="displayName" value="${esc(state.user?.displayName || '')}" required></div>
-      <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
-    </form>
-  </div>`;
-
-  h += `<div class="settings-panel">
-    <h2>Change Password</h2>
-    <form id="password-form">
-      <div class="form-group"><label>Current Password</label>
-        <input type="password" name="current" required autocomplete="current-password"></div>
-      <div class="form-group"><label>New Password</label>
-        <input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
-      <div class="form-group"><label>Confirm New Password</label>
-        <input type="password" name="confirm" required autocomplete="new-password"></div>
-      <div class="form-actions"><button type="submit" class="btn btn-primary">Change Password</button></div>
-    </form>
-  </div>`;
-
-  if (isAdmin) {
+  if (isAdmin || noUsers) {
     h += `<div class="settings-panel">
       <h2>Users</h2>
       <div class="view-header" style="margin-bottom:16px"><div></div>
         <button class="btn btn-primary" onclick="showCreateUserModal()">+ Add User</button></div>
       <div id="users-list"><p class="card-meta">Loading…</p></div>
+    </div>`;
+  }
+
+  if (state.user) {
+    h += `<div class="settings-panel">
+      <h2>Profile</h2>
+      <form id="profile-form">
+        <div class="form-group"><label>Display Name</label>
+          <input name="displayName" value="${esc(state.user.displayName || '')}" required></div>
+        <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+      </form>
+    </div>`;
+
+    h += `<div class="settings-panel">
+      <h2>Change Password</h2>
+      <form id="password-form">
+        <div class="form-group"><label>Current Password</label>
+          <input type="password" name="current" required autocomplete="current-password"></div>
+        <div class="form-group"><label>New Password</label>
+          <input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
+        <div class="form-group"><label>Confirm New Password</label>
+          <input type="password" name="confirm" required autocomplete="new-password"></div>
+        <div class="form-actions"><button type="submit" class="btn btn-primary">Change Password</button></div>
+      </form>
     </div>`;
   }
 
@@ -1374,8 +1376,8 @@ async function loadUsersList() {
   const el = document.getElementById('users-list');
   if (!el) return;
   try {
-    const users = await api('GET', '/users');
-    if (!users.length) { el.innerHTML = '<p class="empty-state">No users.</p>'; return; }
+    const users = await api('GET', '/users').catch(() => []);
+    if (!users.length) { el.innerHTML = '<p class="empty-state">No users yet. Add your first user to enable authentication.</p>'; return; }
     let h = `<table class="data-table"><thead><tr>
       <th>Username</th><th>Display Name</th><th>Role</th><th>Last Login</th><th></th>
     </tr></thead><tbody>`;
@@ -1400,6 +1402,8 @@ async function loadUsersList() {
 }
 
 window.showCreateUserModal = function() {
+  const isFirstUser = !state.user;
+  const defaultRole = isFirstUser ? 'admin' : 'editor';
   showModal(`<h2>Add User</h2>
     <form id="create-user-form">
       <div class="form-group"><label>Username</label>
@@ -1410,8 +1414,8 @@ window.showCreateUserModal = function() {
         <input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
       <div class="form-group"><label>Role</label>
         <select name="role">
-          <option value="editor">Editor — can manage all content</option>
-          <option value="admin">Admin — full access including user management</option>
+          <option value="editor" ${defaultRole === 'editor' ? 'selected' : ''}>Editor — can manage all content</option>
+          <option value="admin" ${defaultRole === 'admin' ? 'selected' : ''}>Admin — full access including user management</option>
         </select></div>
       <div class="form-actions">
         <button type="button" class="btn" onclick="hideModal()">Cancel</button>
@@ -1421,13 +1425,27 @@ window.showCreateUserModal = function() {
   document.getElementById('create-user-form').onsubmit = async e => {
     e.preventDefault();
     const f = e.target;
+    const username = f.username.value.trim();
+    const password = f.password.value;
     try {
       await api('POST', '/users', {
-        username: f.username.value.trim(),
-        displayName: f.displayName.value.trim() || f.username.value.trim(),
-        password: f.password.value,
+        username,
+        displayName: f.displayName.value.trim() || username,
+        password,
         role: f.role.value,
       });
+      if (isFirstUser) {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        if (res.ok) {
+          hideModal();
+          await load();
+          return;
+        }
+      }
       hideModal();
       loadUsersList();
     } catch (err) { alert(err.message); }
