@@ -129,8 +129,11 @@ export function preparePreviewHTML(rawHTML, partial, siteCSS) {
 
   const wrapStyle = width === '100%' ? '' : `max-width:${width};margin:0 auto;`;
 
+  const hasLightText = /color:\s*#fff|color:\s*#ffffff|color:\s*white|color:\s*rgba\(255/i.test(partialCSS);
+  const bgColor = hasLightText ? '#1b1b1b' : '#fff';
+
   return '<!DOCTYPE html><html><head>' + siteCSS +
-    '<style>body{margin:0;background:#fff;padding:' + (width === '100%' ? '0' : '16px') + ';}' +
+    '<style>body{margin:0;background:' + bgColor + ';padding:' + (width === '100%' ? '0' : '16px') + ';}' +
     partialCSS + '</style></head><body>' +
     '<div class="preview-wrap" style="' + wrapStyle + '"' + dataAttrs + '>' +
     bodyHTML.trim() + '</div>' +

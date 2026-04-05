@@ -2,7 +2,7 @@
 
 Open-source website builder with AI built in. Not a coding tool — the AI lives inside the product. Anyone on your team opens the dashboard, describes a page in plain language, and the system builds it within the site's existing design system. Then you edit your own words directly on the rendered page.
 
-This is not vibe coding. Vibe coding is a developer prompting an external AI to generate code they then have to evaluate and maintain. Stablemount is a managed environment where AI-generated output is automatically constrained by design tokens, instruction rules, and a growing component library. Every page the AI builds makes the next one more consistent. The architecture exists to capture, standardize, and accumulate the decisions that would otherwise be throwaway context in a chat window.
+There are some key differences between Stablemount and basic vibe coding. Stablemount is a managed environment where AI-generated output is automatically constrained by design tokens, instruction rules, and a growing component library. Every page the AI builds makes the next one more consistent. The architecture exists to capture, standardize, and accumulate the decisions that would otherwise be throwaway context in a chat window.
 
 ## How to use Stablemount
 

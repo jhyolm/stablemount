@@ -219,7 +219,8 @@ body {
 
 .card-actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* ── Table ── */
