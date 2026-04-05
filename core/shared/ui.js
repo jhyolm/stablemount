@@ -442,3 +442,50 @@ export function renderMediaCard(item) {
     </div>
   </div>`;
 }
+
+// ── Streaming AI helper ──
+
+export async function streamAI(url, body, { onToken, onDone, onError }) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    if (onError) onError(err.error || 'Request failed');
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let eventType = null;
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7).trim();
+      } else if (line.startsWith('data: ') && eventType) {
+        const data = line.slice(6);
+        try {
+          const parsed = JSON.parse(data);
+          if (eventType === 'token' && onToken) onToken(parsed);
+          else if (eventType === 'done' && onDone) onDone(parsed);
+          else if (eventType === 'error' && onError) onError(parsed);
+        } catch {}
+        eventType = null;
+      } else if (line === '') {
+        eventType = null;
+      }
+    }
+  }
+}

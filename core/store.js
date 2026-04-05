@@ -482,13 +482,14 @@ export function getPageHTML(slug) {
   return existsSync(file) ? readFileSync(file, 'utf8') : null;
 }
 
-export function createPage({ title, slug, intent = '', status = 'draft' }) {
+export function createPage({ title, slug, intent = '', status = 'draft', seo }) {
   const pages = listPages();
   const page = {
     id: genId(), title, slug, intent, status,
     created: new Date().toISOString(),
     updated: new Date().toISOString(),
   };
+  if (seo && typeof seo === 'object') page.seo = seo;
   pages.push(page);
   writeJSON(PATHS.pages, pages);
   return page;

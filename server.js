@@ -38,7 +38,7 @@ import {
   listFunctions, getFunctionCode, saveFunctionCode, deleteFunction as deleteFunc,
   listMedia, addMedia, deleteMedia,
 } from './core/store.js';
-import { generatePage, chatModifyPage, chatSite, generateCollectionTemplates, MODELS, getChatModel, setChatModel } from './core/ai.js';
+import { generatePage, generatePageStream, chatModifyPage, chatSite, chatSiteStream, generateCollectionTemplates, MODELS, getChatModel, setChatModel } from './core/ai.js';
 import { parsePartial, resolvePartials, restorePartialDirectives } from './core/partial.js';
 import { renderListing, renderDetail, resolveCollectionDirectives, restoreCollectionDirectives } from './core/collection.js';
 import { localizeImages } from './core/images.js';
@@ -117,6 +117,81 @@ function buildTokenStyle() {
   return `<style data-sm-tokens>:root {\n${vars}\n}</style>`;
 }
 
+function extractAutoDescription(html) {
+  const m = html.match(/data-content="[^"]*"[^>]*>([^<]{10,})/);
+  if (m) return m[1].trim().slice(0, 160);
+  const bodyM = html.match(/<p[^>]*>([^<]{10,})/i);
+  if (bodyM) return bodyM[1].trim().slice(0, 160);
+  return '';
+}
+
+function esc_attr(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function buildSEOTags(slug, html, req) {
+  const site = getSite();
+  const siteSeo = site.seo || {};
+  const page = getPageBySlug(slug);
+  const pageSeo = page?.seo || {};
+
+  const title = pageSeo.title || ((page?.title || slug) + (siteSeo.titleSuffix || ''));
+  const description = pageSeo.description || siteSeo.defaultDescription || extractAutoDescription(html);
+  const ogImage = pageSeo.ogImage || siteSeo.ogImage || '';
+  const canonical = pageSeo.canonicalUrl || '';
+  const robots = pageSeo.robots || 'index, follow';
+  const locale = siteSeo.locale || 'en_US';
+  const twitterHandle = siteSeo.twitterHandle || '';
+  const siteUrl = siteSeo.url || (req ? `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}` : '');
+  const pageUrl = siteUrl ? `${siteUrl}${slug === 'home' ? '/' : '/' + slug}` : '';
+
+  let tags = '';
+  tags += `<title>${esc_attr(title)}</title>\n`;
+  tags += `<meta name="description" content="${esc_attr(description)}">\n`;
+  tags += `<meta name="robots" content="${esc_attr(robots)}">\n`;
+  if (canonical || pageUrl) tags += `<link rel="canonical" href="${esc_attr(canonical || pageUrl)}">\n`;
+  tags += `<meta property="og:type" content="website">\n`;
+  tags += `<meta property="og:title" content="${esc_attr(title)}">\n`;
+  if (description) tags += `<meta property="og:description" content="${esc_attr(description)}">\n`;
+  if (pageUrl) tags += `<meta property="og:url" content="${esc_attr(pageUrl)}">\n`;
+  if (ogImage) tags += `<meta property="og:image" content="${esc_attr(ogImage.startsWith('/') && siteUrl ? siteUrl + ogImage : ogImage)}">\n`;
+  if (locale) tags += `<meta property="og:locale" content="${esc_attr(locale)}">\n`;
+  tags += `<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}">\n`;
+  tags += `<meta name="twitter:title" content="${esc_attr(title)}">\n`;
+  if (description) tags += `<meta name="twitter:description" content="${esc_attr(description)}">\n`;
+  if (ogImage) tags += `<meta name="twitter:image" content="${esc_attr(ogImage.startsWith('/') && siteUrl ? siteUrl + ogImage : ogImage)}">\n`;
+  if (twitterHandle) tags += `<meta name="twitter:site" content="${esc_attr(twitterHandle)}">\n`;
+
+  const schemaType = pageSeo.schemaOrg?.type || 'WebPage';
+  const siteSchema = siteSeo.schemaOrg || {};
+  const ld = { '@context': 'https://schema.org', '@type': schemaType, name: title };
+  if (description) ld.description = description;
+  if (pageUrl) ld.url = pageUrl;
+  if (ogImage) ld.image = ogImage.startsWith('/') && siteUrl ? siteUrl + ogImage : ogImage;
+  if (siteSchema.type === 'Organization' || siteSchema.name) {
+    ld.publisher = { '@type': siteSchema.type || 'Organization' };
+    if (siteSchema.name) ld.publisher.name = siteSchema.name;
+    if (siteSchema.url) ld.publisher.url = siteSchema.url;
+    if (siteSchema.logo) ld.publisher.logo = siteSchema.logo;
+  }
+  tags += `<script type="application/ld+json">${JSON.stringify(ld)}</script>\n`;
+
+  return tags;
+}
+
+function injectSEO(html, slug, req) {
+  const seoTags = buildSEOTags(slug, html, req);
+  html = html.replace(/<title>[^<]*<\/title>\s*\n?/i, '');
+  html = html.replace(/<meta\s+name="description"[^>]*>\s*\n?/i, '');
+  html = html.replace(/<meta\s+property="og:[^"]*"[^>]*>\s*\n?/gi, '');
+  html = html.replace(/<meta\s+name="twitter:[^"]*"[^>]*>\s*\n?/gi, '');
+  html = html.replace(/<link\s+rel="canonical"[^>]*>\s*\n?/i, '');
+  html = html.replace(/<meta\s+name="robots"[^>]*>\s*\n?/i, '');
+  html = html.replace(/<script\s+type="application\/ld\+json">[^<]*<\/script>\s*\n?/gi, '');
+  html = html.replace('</head>', seoTags + '</head>');
+  return html;
+}
+
 function injectOverlay(html, slug, pageTitle) {
   const tokenStyle = buildTokenStyle();
   if (tokenStyle) {
@@ -183,6 +258,128 @@ function requireAdmin(req) {
 }
 
 migrateAuth();
+
+async function applyChatResult(result, pageSlug, pageHTML, chatSlug) {
+  const actionResults = [];
+  for (const a of (result.actions || [])) {
+    try {
+      switch (a.action) {
+        case 'createCollection': {
+          createCollection({ name: a.name, slug: a.slug, schema: a.schema || [] });
+          actionResults.push({ action: 'createCollection', slug: a.slug });
+          break;
+        }
+        case 'createEntry': {
+          createEntry(a.collection, { slug: a.slug, data: a.data || {} });
+          actionResults.push({ action: 'createEntry', collection: a.collection, slug: a.slug });
+          break;
+        }
+        case 'createPage': {
+          const genResult = await generatePage(a.intent || `A ${a.title} page`);
+          createPage({ title: a.title, slug: a.slug, intent: a.intent || '' });
+          const finalHTML = await localizeImages(genResult.html);
+          savePageHTML(a.slug, finalHTML);
+          broadcast('pages');
+          actionResults.push({ action: 'createPage', slug: a.slug });
+          break;
+        }
+        case 'createPartial': {
+          if (a.name) {
+            createPartial({
+              name: a.name, html: a.html || '', mode: a.mode || 'global',
+              weight: a.weight || 'rule', scope: a.scope || 'global',
+              isPattern: !!a.isPattern, preview: a.preview,
+            });
+            broadcast('partials');
+            actionResults.push({ action: 'createPartial', name: a.name });
+          }
+          break;
+        }
+        case 'deletePartial': {
+          const partial = getPartialByName(a.name);
+          if (partial) { deletePartial(partial.id, { inlineBack: true }); broadcast('partials'); broadcast('pages'); actionResults.push({ action: 'deletePartial', name: a.name }); }
+          break;
+        }
+        case 'deletePage': {
+          const pg = getPageBySlug(a.slug);
+          if (pg) { deletePage(pg.id); broadcast('pages'); actionResults.push({ action: 'deletePage', slug: a.slug }); }
+          break;
+        }
+        case 'deleteCollection': {
+          const col = getCollectionBySlug(a.slug);
+          if (col) { deleteCollection(col.id); actionResults.push({ action: 'deleteCollection', slug: a.slug }); }
+          break;
+        }
+        case 'deleteEntry': {
+          const entryCol = getCollectionBySlug(a.collection);
+          if (entryCol) {
+            const entries = listEntries(a.collection);
+            const entry = entries.find(e => e.slug === a.slug);
+            if (entry) { deleteEntry(a.collection, entry.id); actionResults.push({ action: 'deleteEntry', slug: a.slug }); }
+          }
+          break;
+        }
+        case 'createFunction': {
+          if (a.name && a.code) { saveFunctionCode(a.name, a.code); actionResults.push({ action: 'createFunction', name: a.name }); }
+          break;
+        }
+        case 'deleteFunction': {
+          if (a.name) { deleteFunc(a.name); actionResults.push({ action: 'deleteFunction', name: a.name }); }
+          break;
+        }
+      }
+    } catch (err) {
+      console.error(`Action ${a.action} failed:`, err.message);
+    }
+  }
+
+  let modifiedPageHTML = null;
+  const applied = [];
+
+  for (const c of (result.changes || [])) {
+    if (!c.file || !c.old || c.new === undefined) continue;
+    if (c.file.startsWith('pages/') && c.file.endsWith('.html')) {
+      const targetSlug = c.file.replace('pages/', '').replace('.html', '');
+      if (targetSlug === pageSlug && pageHTML) {
+        if (!modifiedPageHTML) modifiedPageHTML = pageHTML;
+        if (modifiedPageHTML.includes(c.old)) { modifiedPageHTML = modifiedPageHTML.replace(c.old, c.new); applied.push(c.file); }
+      } else {
+        let targetHTML = getPageHTML(targetSlug);
+        if (targetHTML && targetHTML.includes(c.old)) { targetHTML = targetHTML.replace(c.old, c.new); targetHTML = await localizeImages(targetHTML); savePageHTML(targetSlug, targetHTML); applied.push(c.file); }
+      }
+    } else if (c.file.startsWith('partials/') && c.file.endsWith('.html')) {
+      const partialName = c.file.replace('partials/', '').replace('.html', '');
+      let partialHTML = getPartialHTMLByName(partialName);
+      if (partialHTML && partialHTML.includes(c.old)) { partialHTML = partialHTML.replace(c.old, c.new); savePartialHTMLByName(partialName, partialHTML); applied.push(c.file); }
+    } else if (c.file === 'decisions.json') {
+      let raw = JSON.stringify(listDecisions(), null, 2);
+      if (raw.includes(c.old)) { raw = raw.replace(c.old, c.new); try { saveDecisions(JSON.parse(raw)); applied.push(c.file); } catch (_) {} }
+    } else if (c.file === 'site.json') {
+      let raw = JSON.stringify(getSite(), null, 2);
+      if (raw.includes(c.old)) { raw = raw.replace(c.old, c.new); try { updateSite(JSON.parse(raw)); applied.push(c.file); } catch (_) {} }
+    } else if (c.file.startsWith('functions/') && c.file.endsWith('.js')) {
+      const fnName = c.file.replace('functions/', '').replace('.js', '');
+      let code = getFunctionCode(fnName);
+      if (code && code.includes(c.old)) { code = code.replace(c.old, c.new); saveFunctionCode(fnName, code); applied.push(c.file); }
+    }
+  }
+
+  if (modifiedPageHTML && modifiedPageHTML !== pageHTML) {
+    modifiedPageHTML = await localizeImages(modifiedPageHTML);
+    savePageHTML(pageSlug, modifiedPageHTML);
+    runHook(extensions.hooks, 'onContentChange', { type: 'page', slug: pageSlug, action: 'ai-edit' });
+  }
+
+  appendChat(chatSlug, { role: 'assistant', content: result.reply });
+  await runHook(extensions.hooks, 'onAIResponse', { reply: result.reply, changes: result.changes, actions: result.actions, page: pageSlug });
+
+  return {
+    reply: result.reply,
+    html: modifiedPageHTML && modifiedPageHTML !== pageHTML ? modifiedPageHTML : null,
+    applied,
+    actionResults,
+  };
+}
 
 // Load developer extensions at startup, hot-reload on file changes
 let extensions = { routes: new Map(), middleware: [], hooks: { onRequest: [], onPageRender: [], onPageSave: [], onContentChange: [], onAIResponse: [] }, manifests: [] };
@@ -520,42 +717,61 @@ const server = createServer(async (req, res) => {
       }
       if (!intent || !body.title) return send(res, 400, { error: 'intent and title are required' });
 
+      const wantStream = (req.headers.accept || '').includes('text/event-stream');
+
+      async function saveGenerateResult(result) {
+        const existingDecisions = listDecisions();
+        const newDecisions = [];
+        for (const d of result.decisions) {
+          if (!d.name || !d.kind) continue;
+          if (existingDecisions.some(e => e.name.toLowerCase() === d.name.toLowerCase())) continue;
+          newDecisions.push(createDecision({
+            name: d.name, kind: d.kind,
+            weight: d.weight || 'rule', scope: d.scope || 'global',
+            content: d.content || '', variable: d.variable,
+          }));
+        }
+        const existingPartials = listPartials();
+        const newPartials = [];
+        for (const c of result.components) {
+          if (!c.name || !c.html) continue;
+          if (existingPartials.some(e => e.name.toLowerCase() === c.name.toLowerCase())) continue;
+          newPartials.push(createPartial({
+            name: c.name, html: c.html,
+            mode: c.mode || 'global', weight: c.weight || 'rule',
+            scope: c.scope || 'global', isPattern: !!c.isPattern, preview: c.preview,
+          }));
+        }
+        const page = createPage({ title, slug, intent, seo: result.seo });
+        const finalHTML = await localizeImages(result.html);
+        savePageHTML(slug, finalHTML);
+        return { page, newDecisions, newPartials };
+      }
+
+      if (wantStream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+        try {
+          const gen = generatePageStream(intent, slug);
+          let genResult = null;
+          for await (const ev of gen) {
+            if (ev.type === 'token') {
+              res.write(`event: token\ndata: ${JSON.stringify(ev.text)}\n\n`);
+            } else if (ev.type === 'done') {
+              genResult = ev.result;
+            }
+          }
+          if (!genResult) throw new Error('AI generation produced no result');
+          const saved = await saveGenerateResult(genResult);
+          res.write(`event: done\ndata: ${JSON.stringify(saved)}\n\n`);
+        } catch (err) {
+          res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
+        }
+        return res.end();
+      }
+
       const result = await generatePage(intent, slug);
-
-      // Save proposed decisions (skip duplicates by name)
-      const existingDecisions = listDecisions();
-      const newDecisions = [];
-      for (const d of result.decisions) {
-        if (!d.name || !d.kind) continue;
-        if (existingDecisions.some(e => e.name.toLowerCase() === d.name.toLowerCase())) continue;
-        newDecisions.push(createDecision({
-          name: d.name, kind: d.kind,
-          weight: d.weight || 'rule', scope: d.scope || 'global',
-          content: d.content || '', variable: d.variable,
-        }));
-      }
-
-      // Save proposed partials (skip duplicates by name)
-      const existingPartials = listPartials();
-      const newPartials = [];
-      for (const c of result.components) {
-        if (!c.name || !c.html) continue;
-        if (existingPartials.some(e => e.name.toLowerCase() === c.name.toLowerCase())) continue;
-        newPartials.push(createPartial({
-          name: c.name, html: c.html,
-          mode: c.mode || 'global',
-          weight: c.weight || 'rule',
-          scope: c.scope || 'global',
-          isPattern: !!c.isPattern,
-          preview: c.preview,
-        }));
-      }
-
-      const page = createPage({ title, slug, intent });
-      const finalHTML = await localizeImages(result.html);
-      savePageHTML(slug, finalHTML);
-
-      return send(res, 201, { page, newDecisions, newPartials });
+      const saved = await saveGenerateResult(result);
+      return send(res, 201, saved);
     }
 
     // ── API: Unified Chat ──
@@ -575,168 +791,33 @@ const server = createServer(async (req, res) => {
         aiMessage = `[SELECTED AREA: ${selection.name || 'element'}]\n${selection.html}\n[/SELECTED]\n\n${message}`;
       }
 
-      const result = await chatSite(aiMessage, history, pageHTML || null, pageSlug || null);
+      const wantStream = (req.headers.accept || '').includes('text/event-stream');
 
-      console.log('[chat] reply:', result.reply);
-      console.log('[chat] actions:', JSON.stringify(result.actions, null, 2));
-      console.log('[chat] changes:', result.changes.length, 'patches');
-
-      const actionResults = [];
-      for (const a of result.actions) {
-        console.log('[chat] executing action:', a.action, a.slug || a.collection || '');
+      if (wantStream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
         try {
-          switch (a.action) {
-            case 'createCollection': {
-              createCollection({ name: a.name, slug: a.slug, schema: a.schema || [] });
-              actionResults.push({ action: 'createCollection', slug: a.slug });
-              break;
-            }
-            case 'createEntry': {
-              createEntry(a.collection, { slug: a.slug, data: a.data || {} });
-              actionResults.push({ action: 'createEntry', collection: a.collection, slug: a.slug });
-              break;
-            }
-            case 'createPage': {
-              const genResult = await generatePage(a.intent || `A ${a.title} page`);
-              createPage({ title: a.title, slug: a.slug, intent: a.intent || '' });
-              const finalHTML = await localizeImages(genResult.html);
-              savePageHTML(a.slug, finalHTML);
-              broadcast('pages');
-              actionResults.push({ action: 'createPage', slug: a.slug });
-              break;
-            }
-            case 'createPartial': {
-              if (a.name) {
-                createPartial({
-                  name: a.name,
-                  html: a.html || '',
-                  mode: a.mode || 'global',
-                  weight: a.weight || 'rule',
-                  scope: a.scope || 'global',
-                  isPattern: !!a.isPattern,
-                  preview: a.preview,
-                });
-                broadcast('partials');
-                actionResults.push({ action: 'createPartial', name: a.name });
-              }
-              break;
-            }
-            case 'deletePartial': {
-              const partial = getPartialByName(a.name);
-              if (partial) { deletePartial(partial.id, { inlineBack: true }); broadcast('partials'); broadcast('pages'); actionResults.push({ action: 'deletePartial', name: a.name }); }
-              break;
-            }
-            case 'deletePage': {
-              const pg = getPageBySlug(a.slug);
-              if (pg) { deletePage(pg.id); broadcast('pages'); actionResults.push({ action: 'deletePage', slug: a.slug }); }
-              break;
-            }
-            case 'deleteCollection': {
-              const col = getCollectionBySlug(a.slug);
-              if (col) { deleteCollection(col.id); actionResults.push({ action: 'deleteCollection', slug: a.slug }); }
-              break;
-            }
-            case 'deleteEntry': {
-              const entryCol = getCollectionBySlug(a.collection);
-              if (entryCol) {
-                const entries = listEntries(a.collection);
-                const entry = entries.find(e => e.slug === a.slug);
-                if (entry) { deleteEntry(a.collection, entry.id); actionResults.push({ action: 'deleteEntry', slug: a.slug }); }
-              }
-              break;
-            }
-            case 'createFunction': {
-              if (a.name && a.code) {
-                saveFunctionCode(a.name, a.code);
-                actionResults.push({ action: 'createFunction', name: a.name });
-              }
-              break;
-            }
-            case 'deleteFunction': {
-              if (a.name) {
-                deleteFunc(a.name);
-                actionResults.push({ action: 'deleteFunction', name: a.name });
-              }
-              break;
+          const gen = chatSiteStream(aiMessage, history, pageHTML || null, pageSlug || null);
+          let result = null;
+          for await (const ev of gen) {
+            if (ev.type === 'token') {
+              res.write(`event: token\ndata: ${JSON.stringify(ev.text)}\n\n`);
+            } else if (ev.type === 'done') {
+              result = ev.result;
             }
           }
+          if (!result) result = { reply: '', changes: [], actions: [] };
+
+          const finalResult = await applyChatResult(result, pageSlug, pageHTML, chatSlug);
+          res.write(`event: done\ndata: ${JSON.stringify(finalResult)}\n\n`);
         } catch (err) {
-          console.error(`Action ${a.action} failed:`, err.message);
+          res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
         }
+        return res.end();
       }
 
-      let modifiedPageHTML = null;
-      const applied = [];
-
-      for (const c of result.changes) {
-        if (!c.file || !c.old || c.new === undefined) continue;
-
-        if (c.file.startsWith('pages/') && c.file.endsWith('.html')) {
-          const targetSlug = c.file.replace('pages/', '').replace('.html', '');
-          if (targetSlug === pageSlug && pageHTML) {
-            if (!modifiedPageHTML) modifiedPageHTML = pageHTML;
-            if (modifiedPageHTML.includes(c.old)) {
-              modifiedPageHTML = modifiedPageHTML.replace(c.old, c.new);
-              applied.push(c.file);
-            }
-          } else {
-            let targetHTML = getPageHTML(targetSlug);
-            if (targetHTML && targetHTML.includes(c.old)) {
-              targetHTML = targetHTML.replace(c.old, c.new);
-              targetHTML = await localizeImages(targetHTML);
-              savePageHTML(targetSlug, targetHTML);
-              applied.push(c.file);
-            }
-          }
-        } else if (c.file.startsWith('partials/') && c.file.endsWith('.html')) {
-          const partialName = c.file.replace('partials/', '').replace('.html', '');
-          let partialHTML = getPartialHTMLByName(partialName);
-          if (partialHTML && partialHTML.includes(c.old)) {
-            partialHTML = partialHTML.replace(c.old, c.new);
-            savePartialHTMLByName(partialName, partialHTML);
-            applied.push(c.file);
-          }
-        } else if (c.file === 'decisions.json') {
-          let raw = JSON.stringify(listDecisions(), null, 2);
-          if (raw.includes(c.old)) {
-            raw = raw.replace(c.old, c.new);
-            try { saveDecisions(JSON.parse(raw)); applied.push(c.file); }
-            catch (_) { }
-          }
-        } else if (c.file === 'site.json') {
-          let raw = JSON.stringify(getSite(), null, 2);
-          if (raw.includes(c.old)) {
-            raw = raw.replace(c.old, c.new);
-            try { updateSite(JSON.parse(raw)); applied.push(c.file); }
-            catch (_) { }
-          }
-        } else if (c.file.startsWith('functions/') && c.file.endsWith('.js')) {
-          const fnName = c.file.replace('functions/', '').replace('.js', '');
-          let code = getFunctionCode(fnName);
-          if (code && code.includes(c.old)) {
-            code = code.replace(c.old, c.new);
-            saveFunctionCode(fnName, code);
-            applied.push(c.file);
-          }
-        }
-      }
-
-      if (modifiedPageHTML && modifiedPageHTML !== pageHTML) {
-        modifiedPageHTML = await localizeImages(modifiedPageHTML);
-        savePageHTML(pageSlug, modifiedPageHTML);
-        runHook(extensions.hooks, 'onContentChange', { type: 'page', slug: pageSlug, action: 'ai-edit' });
-      }
-
-      appendChat(chatSlug, { role: 'assistant', content: result.reply });
-
-      await runHook(extensions.hooks, 'onAIResponse', { reply: result.reply, changes: result.changes, actions: result.actions, page: pageSlug });
-
-      return send(res, 200, {
-        reply: result.reply,
-        html: modifiedPageHTML && modifiedPageHTML !== pageHTML ? modifiedPageHTML : null,
-        applied,
-        actionResults,
-      });
+      const result = await chatSite(aiMessage, history, pageHTML || null, pageSlug || null);
+      const finalResult = await applyChatResult(result, pageSlug, pageHTML, chatSlug);
+      return send(res, 200, finalResult);
     }
 
     // ── API: Chat history (per-slug) ──
@@ -914,6 +995,7 @@ const server = createServer(async (req, res) => {
           let html = renderListing(col.slug, col.name);
           if (html) {
             html = resolveCollectionDirectives(html);
+            html = injectSEO(html, col.slug, req);
             html = injectOverlay(html, col.slug, col.name);
             return send(res, 200, html, 'text/html');
           }
@@ -921,6 +1003,7 @@ const server = createServer(async (req, res) => {
           let html = renderDetail(col.slug, pathParts[1], col.name);
           if (html) {
             html = resolveCollectionDirectives(html);
+            html = injectSEO(html, `${col.slug}/${pathParts[1]}`, req);
             html = injectOverlay(html, `${col.slug}/${pathParts[1]}`, pathParts[1]);
             return send(res, 200, html, 'text/html');
           }
@@ -963,6 +1046,7 @@ const server = createServer(async (req, res) => {
 
         html = await runTransformHook(extensions.hooks, 'onPageRender', html, slug);
 
+        html = injectSEO(html, slug, req);
         html = injectOverlay(html, slug, page?.title);
         return send(res, 200, html, 'text/html');
       }

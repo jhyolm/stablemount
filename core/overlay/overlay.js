@@ -337,48 +337,24 @@
     contextSendBtn.textContent = '...';
 
     addChatMessage('user', message);
-    addChatMessage('ai', '...');
+    addChatMessage('ai', '');
     const loadingMsg = chatMessages.lastChild;
+    loadingMsg.classList.add('sm-streaming');
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          slug,
-          html: getChatHTML(),
-          selection: { name, html: sectionHTML },
-        }),
+      await UI().streamAI('/api/chat', {
+        message, slug, html: getChatHTML(),
+        selection: { name, html: sectionHTML },
+      }, {
+        onToken(text) {
+          loadingMsg.textContent += text;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        },
+        onDone(data) { handleChatResult(data, loadingMsg); },
+        onError(err) { loadingMsg.classList.remove('sm-streaming'); loadingMsg.textContent = 'Error: ' + err; },
       });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(errData.error || `Server error (${res.status})`);
-      }
-      const data = await res.json();
-      loadingMsg.textContent = data.reply || 'Done.';
-
-      if (data.html) {
-        applyNewHTML(data.html);
-        const others = (data.applied || []).filter(f => !f.startsWith('pages/'));
-        if (others.length) {
-          toast('Updated: section + ' + others.join(', '));
-        } else {
-          toast('Section updated by AI');
-        }
-      } else {
-        deselectSection();
-        if (data.applied && data.applied.length) {
-          toast('Updated: ' + data.applied.join(', '));
-        }
-      }
-
-      if (data.actionResults && data.actionResults.length) {
-        const summary = data.actionResults.map(a => `${a.action}: ${a.slug}`).join(', ');
-        toast('Actions: ' + summary);
-      }
     } catch (err) {
+      loadingMsg.classList.remove('sm-streaming');
       loadingMsg.textContent = 'Error: ' + err.message;
     } finally {
       contextSendBtn.disabled = false;
@@ -1157,6 +1133,23 @@
     markDirty();
   }
 
+  function handleChatResult(data, loadingMsg) {
+    loadingMsg.classList.remove('sm-streaming');
+    if (!loadingMsg.textContent.trim()) loadingMsg.textContent = data.reply || 'Done.';
+    if (data.html) {
+      applyNewHTML(data.html);
+      const others = (data.applied || []).filter(f => !f.startsWith('pages/'));
+      if (others.length) { toast('Updated: page + ' + others.join(', ')); }
+      else { toast('Page updated by AI'); }
+    } else if (data.applied && data.applied.length) {
+      toast('Updated: ' + data.applied.join(', '));
+    }
+    if (data.actionResults && data.actionResults.length) {
+      const summary = data.actionResults.map(a => `${a.action}: ${a.slug || a.name}`).join(', ');
+      toast('Actions: ' + summary);
+    }
+  }
+
   async function sendChat() {
     const message = chatInput.value.trim();
     if (!message) return;
@@ -1164,41 +1157,22 @@
     chatInput.value = '';
     chatSendBtn.disabled = true;
     addChatMessage('user', message);
-    addChatMessage('ai', '...');
+    addChatMessage('ai', '');
 
     const loadingMsg = chatMessages.lastChild;
+    loadingMsg.classList.add('sm-streaming');
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, slug, html: getChatHTML() }),
+      await UI().streamAI('/api/chat', { message, slug, html: getChatHTML() }, {
+        onToken(text) {
+          loadingMsg.textContent += text;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        },
+        onDone(data) { handleChatResult(data, loadingMsg); },
+        onError(err) { loadingMsg.classList.remove('sm-streaming'); loadingMsg.textContent = 'Error: ' + err; },
       });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(errData.error || `Server error (${res.status})`);
-      }
-      const data = await res.json();
-      loadingMsg.textContent = data.reply || 'Done.';
-
-      if (data.html) {
-        applyNewHTML(data.html);
-        const others = (data.applied || []).filter(f => !f.startsWith('pages/'));
-        if (others.length) {
-          toast('Updated: page + ' + others.join(', '));
-        } else {
-          toast('Page updated by AI');
-        }
-      } else if (data.applied && data.applied.length) {
-        toast('Updated: ' + data.applied.join(', '));
-      }
-
-      if (data.actionResults && data.actionResults.length) {
-        const summary = data.actionResults.map(a => `${a.action}: ${a.slug}`).join(', ');
-        toast('Actions: ' + summary);
-      }
     } catch (err) {
+      loadingMsg.classList.remove('sm-streaming');
       loadingMsg.textContent = 'Error: ' + err.message;
     } finally {
       chatSendBtn.disabled = false;

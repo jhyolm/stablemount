@@ -457,3 +457,17 @@
 .sm-media-copy:hover { background: #334155; color: #e2e8f0; }
 .sm-media-del { color: #64748b; border-color: transparent; }
 .sm-media-del:hover { color: #ef4444; }
+
+/* ── AI Streaming Cursor ── */
+@keyframes sm-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.sm-streaming::after {
+  content: '▍';
+  display: inline;
+  color: #818cf8;
+  animation: sm-cursor-blink 0.8s steps(1) infinite;
+  font-weight: normal;
+  margin-left: 1px;
+}

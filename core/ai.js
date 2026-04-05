@@ -221,7 +221,8 @@ You MUST return a JSON object with this exact structure:
 {
   "html": "<!DOCTYPE html>...complete page HTML...</html>",
   "decisions": [...array of proposed design decisions...],
-  "components": [...array of proposed partials (header, footer, accordion, etc.)...]
+  "components": [...array of proposed partials (header, footer, accordion, etc.)...],
+  "seo": { "description": "A concise meta description for this page (max 160 chars)" }
 }
 
 DESIGN:
@@ -248,6 +249,7 @@ PAGE HTML RULES:
 5. Use <!-- @collection:slug limit=3 sort=created order=desc --> ... <!-- @/collection:slug --> to embed collection items. Template inside uses data-each-entry and {{field}} placeholders.
 6. All CSS in a <style> tag in <head>. You may link ONE Google Fonts pairing.
 7. Use CSS custom properties via var(--token-name). Do NOT define :root {} — the server injects tokens automatically.
+8. Do NOT include <title>, <meta name="description">, <meta property="og:*">, <meta name="twitter:*">, <link rel="canonical">, or <script type="application/ld+json"> tags. The server injects all SEO/meta tags automatically. Just use a simple <title>Page Title</title> as a placeholder — the server will replace it.
 
 RULES FOR DECISIONS:
 ${arch.hasTokens
@@ -313,6 +315,122 @@ EFFICIENCY: Be direct. Do not overthink. Generate confidently and move fast.
     html: result.html || '',
     decisions: Array.isArray(result.decisions) ? result.decisions : [],
     components: Array.isArray(result.components) ? result.components : [],
+    seo: result.seo && typeof result.seo === 'object' ? result.seo : undefined,
+  };
+}
+
+export async function* generatePageStream(intent, pageSlug = null) {
+  const arch = buildArchitecturePrompt(pageSlug, null);
+
+  const systemPrompt = `You are a web designer building pages for Stablemount.
+
+${arch.text}
+
+You MUST return a JSON object with this exact structure:
+{
+  "html": "<!DOCTYPE html>...complete page HTML...</html>",
+  "decisions": [...array of proposed design decisions...],
+  "components": [...array of proposed partials (header, footer, accordion, etc.)...],
+  "seo": { "description": "A concise meta description for this page (max 160 chars)" }
+}
+
+DESIGN:
+${arch.hasTokens
+  ? '- An existing design direction is established. Follow it. Strengthen it where you can, but stay consistent.'
+  : '- This is an early page — you are setting the design direction for the entire site. Choose a strong, distinctive style that is effective for this type of site. Own it. This becomes the foundation everything else builds on.'}
+- Use IMAGES. Use https://loremflickr.com/{width}/{height}/{keyword},{keyword} for contextual stock photos. Comma-separate 2-3 specific keywords that match the page topic. Examples:
+  For a bakery: https://loremflickr.com/1200/600/bakery,bread
+  For a tech company: https://loremflickr.com/1200/600/software,office
+  For <img>: <img src="https://loremflickr.com/600/450/sourdough,bread" alt="descriptive alt text">
+  For backgrounds: background-image: url('https://loremflickr.com/1400/800/bakery,artisan');
+  IMPORTANT: Each image URL with the same keywords returns a DIFFERENT random photo, so you naturally get variety without changing keywords.
+- Pages without images look unfinished. Use them for heroes, sections, features, wherever they serve the content.
+- Write real, plausible content — never lorem ipsum. Copy should sound like a real business.
+- Responsive design with mobile-first media queries.
+- Interactive states on links and buttons (CSS :hover).
+- No JavaScript.
+
+PAGE HTML RULES:
+1. Complete HTML document (<!DOCTYPE html> through </html>).
+2. Add data-content="unique-id" to every editable text element. IDs should be descriptive: "hero-heading", "feature-1-title", etc.
+3. Add data-section="section-name" to logical page sections.
+4. Use <!-- @partial:name --> for partial components (existing or proposed).
+5. Use <!-- @collection:slug limit=3 sort=created order=desc --> ... <!-- @/collection:slug --> to embed collection items. Template inside uses data-each-entry and {{field}} placeholders.
+6. All CSS in a <style> tag in <head>. You may link ONE Google Fonts pairing.
+7. Use CSS custom properties via var(--token-name). Do NOT define :root {} — the server injects tokens automatically.
+8. Do NOT include <title>, <meta name="description">, <meta property="og:*">, <meta name="twitter:*">, <link rel="canonical">, or <script type="application/ld+json"> tags. The server injects all SEO/meta tags automatically. Just use a simple <title>Page Title</title> as a placeholder — the server will replace it.
+
+RULES FOR DECISIONS:
+${arch.hasTokens
+  ? '- Design tokens already exist. Do NOT propose tokens that duplicate existing ones. Only propose NEW tokens if you used values not already covered.'
+  : '- No design tokens exist yet. You MUST propose the core tokens you used: primary color, secondary color, accent color, text color, background color, font family, heading font (if different), border radius, and any other values you chose. These become the site\'s design system.'}
+- Each decision: { "name": "Human Label", "kind": "token|instruction", "variable": "css-var-name", "weight": "rule|guide", "scope": "global", "content": "the value" }
+- For tokens: content is the CSS value (#hex, font name, px/rem value, etc.). "variable" is the CSS variable name WITHOUT the -- prefix (e.g. "color-primary" becomes var(--color-primary)).
+- For instructions: content is prose guidance the AI should follow on future pages. Omit "variable".
+- Only propose decisions that genuinely constrain future generation. Don't propose trivial or obvious things.
+
+RULES FOR PARTIALS:
+${arch.hasPartials
+  ? '- Partials already exist. Use <!-- @partial:name --> directives for them. Only propose NEW partials if you created a distinct reusable pattern.'
+  : '- No partials exist yet. You MUST create a header and footer as partials. The page HTML should use <!-- @partial:header --> and <!-- @partial:footer --> directives for them.'}
+- Each partial: { "name": "lowercase-kebab", "html": "<bundled partial>", "mode": "global|injectable", "preview": { "width": "350px", "data": {...} } }
+- Partials are reusable HTML/CSS/JS bundles injected server-side via <!-- @partial:name --> directives.
+- Global partials (mode "global"): same content everywhere (header, footer). Content is baked into the HTML.
+- Injectable partials (mode "injectable"): templates that read data-* attributes from their parent element. The page provides data, the partial renders it.
+  For injectable partials, include a "preview" field with "width" and "data" (sample data-* key/value pairs for standalone preview).
+- The page HTML must NEVER contain partial markup inline — only the directive comment. The server injects the partial content at browse time.
+- BUNDLED FORMAT: Each partial's "html" field must be a self-contained bundle in this exact order:
+  1. The HTML markup FIRST
+  2. A <style> block with ALL CSS rules the partial needs (scoped by class names)
+  3. A <script> block ONLY if the partial requires interactivity. If no script is needed, omit it entirely.
+- Partial CSS should use the same CSS custom properties (var(--token)) as the page — do NOT redefine :root tokens inside partials.
+- Do NOT duplicate partial CSS in the page <style> — the partial carries its own styles.
+- The page <style> should only contain page-level layout and section styles. Grid containers that arrange partials (e.g. .menu-grid) belong in the page. The partial's own appearance rules belong in the partial bundle.
+- Only propose partials that are genuinely reusable. A one-off hero section is not a partial.
+
+OUTPUT FORMAT:
+Return ONLY valid JSON. No markdown, no code fences, no explanation outside the JSON.
+EFFICIENCY: Be direct. Do not overthink. Generate confidently and move fast.
+- Keep CSS concise — shorthand properties, no redundant rules, minimal comments.
+- Propose 5-8 decisions max (only the essential tokens). Don't over-document.
+- Propose 2-4 partials max (header, footer, maybe one pattern). Keep partial HTML tight.
+- Page HTML should be complete but lean — don't pad with excessive sections. 3-5 sections is plenty for most pages.
+- The response MUST complete within token limits. Prioritize finishing the HTML.`;
+
+  const siteContext = buildSiteContext();
+  const userPrompt = `${siteContext}${!arch.hasTokens && !arch.hasPartials ? 'This is the FIRST page for a brand new site. No decisions or components exist yet. Bootstrap the design system.\n\n' : ''}Generate a complete page for this intent:\n\n${intent}`;
+
+  const model = getModel('generate');
+  const stream = await getClient().messages.create({
+    model,
+    max_tokens: 16000,
+    temperature: 0.7,
+    system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: userPrompt }],
+    stream: true,
+  });
+
+  let fullText = '';
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      fullText += event.delta.text;
+      yield { type: 'token', text: event.delta.text };
+    }
+  }
+
+  fullText = fullText.trim();
+  const fenceMatch = fullText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch) fullText = fenceMatch[1].trim();
+
+  const result = parseGenerationJSON(fullText);
+  yield {
+    type: 'done',
+    result: {
+      html: result.html || '',
+      decisions: Array.isArray(result.decisions) ? result.decisions : [],
+      components: Array.isArray(result.components) ? result.components : [],
+      seo: result.seo && typeof result.seo === 'object' ? result.seo : undefined,
+    },
   };
 }
 
@@ -412,7 +530,7 @@ function trimHistory(history) {
   return history.slice(-MAX_HISTORY_MESSAGES);
 }
 
-export async function chatSite(message, history = [], pageHTML = null, pageSlug = null) {
+function buildChatRequest(message, history, pageHTML, pageSlug) {
   const arch = buildArchitecturePrompt(pageSlug, null);
   const rules = `You are Stablemount's AI assistant. You can modify files and create/delete content.
 
@@ -523,19 +641,10 @@ RULES:
   }
   messages.push({ role: 'user', content: message });
 
-  const model = getModel('chat');
-  const response = await getClient().messages.create({
-    model,
-    max_tokens: 16000,
-    temperature: 0.5,
-    system,
-    messages,
-  });
+  return { system, messages, model: getModel('chat') };
+}
 
-  let raw = response.content[0].text.trim();
-  console.log('[ai:chatSite] raw response length:', raw.length);
-  console.log('[ai:chatSite] raw first 500 chars:', raw.slice(0, 500));
-
+function parseChatJSON(raw) {
   const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) raw = fenceMatch[1].trim();
 
@@ -543,7 +652,6 @@ RULES:
   try {
     result = JSON.parse(raw);
   } catch (_) {
-    console.log('[ai:chatSite] JSON parse failed, trying regex extraction');
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try { result = JSON.parse(jsonMatch[0]); }
@@ -553,14 +661,50 @@ RULES:
     }
   }
 
-  console.log('[ai:chatSite] parsed actions:', (result.actions || []).length);
-  console.log('[ai:chatSite] parsed changes:', (result.changes || []).length);
-
   return {
     reply: result.reply || '',
     changes: result.changes || [],
     actions: result.actions || [],
   };
+}
+
+export async function chatSite(message, history = [], pageHTML = null, pageSlug = null) {
+  const { system, messages, model } = buildChatRequest(message, history, pageHTML, pageSlug);
+
+  const response = await getClient().messages.create({
+    model,
+    max_tokens: 16000,
+    temperature: 0.5,
+    system,
+    messages,
+  });
+
+  const raw = response.content[0].text.trim();
+  console.log('[ai:chatSite] raw response length:', raw.length);
+  return parseChatJSON(raw);
+}
+
+export async function* chatSiteStream(message, history = [], pageHTML = null, pageSlug = null) {
+  const { system, messages, model } = buildChatRequest(message, history, pageHTML, pageSlug);
+
+  const stream = await getClient().messages.create({
+    model,
+    max_tokens: 16000,
+    temperature: 0.5,
+    system,
+    messages,
+    stream: true,
+  });
+
+  let fullText = '';
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      fullText += event.delta.text;
+      yield { type: 'token', text: event.delta.text };
+    }
+  }
+
+  yield { type: 'done', result: parseChatJSON(fullText.trim()) };
 }
 
 // Keep backward-compatible alias

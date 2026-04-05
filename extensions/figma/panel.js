@@ -48,6 +48,8 @@ export function renderPanel() {
     .settings-connected.show { display: flex; align-items: center; gap: 8px; }
     .settings-missing { padding: 10px 16px; background: #3b1320; border-radius: 6px; color: #fca5a5; font-size: 13px; margin-bottom: 20px; cursor: pointer; display: none; }
     .settings-missing.show { display: flex; align-items: center; gap: 8px; }
+    @keyframes figma-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .status.info { animation: figma-pulse 1.5s ease-in-out infinite; }
   </style>
 </head>
 <body>
@@ -329,15 +331,46 @@ export function renderPanel() {
       }
 
       try {
-        const res = await fetch('/x/figma/apply', {
+        let streamText = '';
+        const applyRes = await fetch('/x/figma/apply', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Apply failed');
+        if (!applyRes.ok) {
+          const errData = await applyRes.json().catch(() => ({ error: applyRes.statusText }));
+          throw new Error(errData.error || 'Apply failed');
+        }
+        const reader = applyRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let evtType = null;
+        let finalData = null;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) evtType = line.slice(7).trim();
+            else if (line.startsWith('data: ') && evtType) {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+                if (evtType === 'token') { streamText += parsed; setImportStatus('AI is writing… (' + streamText.length + ' chars)', 'info'); }
+                else if (evtType === 'done') finalData = parsed;
+                else if (evtType === 'error') throw new Error(parsed);
+              } catch (e) { if (evtType === 'error') throw e; }
+              evtType = null;
+            } else if (line === '') evtType = null;
+          }
+        }
 
-        setImportStatus(data.reply || 'Done. Check your pages.', 'success');
+        if (finalData) {
+          setImportStatus(finalData.reply || 'Done. Check your pages.', 'success');
+        } else {
+          setImportStatus('Done. Check your pages.', 'success');
+        }
       } catch (err) {
         setImportStatus('Error: ' + err.message, 'error');
       } finally {

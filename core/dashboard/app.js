@@ -178,6 +178,7 @@ function renderPages() {
       <div class="card-actions">
         <a href="${p.slug === 'home' ? '/' : '/' + esc(p.slug)}" class="btn btn-sm" target="_blank">View & Edit</a>
         <button class="btn btn-sm" onclick="togglePageStatus('${p.id}', '${status}')">${status === 'published' ? 'Unpublish' : 'Publish'}</button>
+        <button class="btn btn-sm" onclick="showPageSEO('${p.id}')">SEO</button>
         <button class="btn btn-sm" onclick="showChatLog('${esc(p.slug)}', '${esc(p.title)}')">Chat Log</button>
         <button class="btn btn-sm" onclick="showHistory('pages','${esc(p.slug)}','${esc(p.title)}')">History</button>
         <button class="btn btn-sm btn-danger" onclick="deletePage('${p.id}')">Delete</button>
@@ -191,6 +192,52 @@ window.togglePageStatus = async function(id, currentStatus) {
   const newStatus = currentStatus === 'published' ? 'draft' : 'published';
   await api('PUT', '/pages/' + id, { status: newStatus });
   await load();
+};
+
+window.showPageSEO = function(pageId) {
+  const page = state.pages.find(p => p.id === pageId);
+  if (!page) return;
+  const seo = page.seo || {};
+  showModal(`<h2>SEO: ${esc(page.title)}</h2>
+    <form id="page-seo-form">
+      <div class="form-group"><label>Title Tag Override</label>
+        <input name="title" value="${esc(seo.title || '')}" placeholder="Defaults to: ${esc(page.title)}${esc((state.site.seo || {}).titleSuffix || '')}">
+        <small class="form-hint">Leave blank to use page title + site suffix</small></div>
+      <div class="form-group"><label>Meta Description</label>
+        <textarea name="description" rows="2" placeholder="Auto-extracted from page content if blank">${esc(seo.description || '')}</textarea></div>
+      <div class="form-group"><label>OG Image</label>
+        <input name="ogImage" value="${esc(seo.ogImage || '')}" placeholder="Defaults to site OG image"></div>
+      <div class="form-group"><label>Canonical URL</label>
+        <input name="canonicalUrl" value="${esc(seo.canonicalUrl || '')}" placeholder="Auto-generated from page URL"></div>
+      <div class="form-group"><label>Robots</label>
+        <select name="robots">
+          <option value="index, follow" ${(!seo.robots || seo.robots === 'index, follow') ? 'selected' : ''}>index, follow (default)</option>
+          <option value="noindex, follow" ${seo.robots === 'noindex, follow' ? 'selected' : ''}>noindex, follow</option>
+          <option value="index, nofollow" ${seo.robots === 'index, nofollow' ? 'selected' : ''}>index, nofollow</option>
+          <option value="noindex, nofollow" ${seo.robots === 'noindex, nofollow' ? 'selected' : ''}>noindex, nofollow</option>
+        </select></div>
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save SEO</button>
+      </div>
+    </form>`);
+  document.getElementById('page-seo-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    const updatedSeo = {};
+    if (f.title.value) updatedSeo.title = f.title.value;
+    if (f.description.value) updatedSeo.description = f.description.value;
+    if (f.ogImage.value) updatedSeo.ogImage = f.ogImage.value;
+    if (f.canonicalUrl.value) updatedSeo.canonicalUrl = f.canonicalUrl.value;
+    if (f.robots.value !== 'index, follow') updatedSeo.robots = f.robots.value;
+    try {
+      await api('PUT', '/pages/' + pageId, { seo: Object.keys(updatedSeo).length ? updatedSeo : undefined });
+      const idx = state.pages.findIndex(p => p.id === pageId);
+      if (idx >= 0) state.pages[idx].seo = Object.keys(updatedSeo).length ? updatedSeo : undefined;
+      hideModal();
+      showToast('Page SEO saved');
+    } catch (err) { alert(err.message); }
+  };
 };
 
 window.publishSite = async function() {
@@ -291,14 +338,37 @@ window.showGenerateModal = function() {
         }
       }
 
-      const result = await api('POST', '/generate', {
-        title: f.title.value,
-        slug: f.slug.value,
-        intent,
-      });
-      hideModal();
-      await load();
-      showGenerationSummary(result);
+      const stream = window.__SM_UI__?.streamAI;
+      if (stream) {
+        hideModal();
+        showLoading('AI is writing…');
+        const loadingEl = document.querySelector('#loading > div');
+        if (loadingEl) loadingEl.classList.add('sm-streaming');
+        let tokenCount = 0;
+        await stream('/api/generate', { title: f.title.value, slug: f.slug.value, intent }, {
+          onToken() {
+            tokenCount++;
+            if (loadingEl && tokenCount % 20 === 0) {
+              loadingEl.childNodes[1].textContent = `AI is writing… (${Math.round(tokenCount / 4)} chars)`;
+            }
+          },
+          onDone(result) {
+            hideLoading();
+            load().then(() => showGenerationSummary(result));
+          },
+          onError(err) {
+            hideLoading();
+            alert('Generation failed: ' + err);
+          },
+        });
+      } else {
+        const result = await api('POST', '/generate', {
+          title: f.title.value, slug: f.slug.value, intent,
+        });
+        hideModal();
+        await load();
+        showGenerationSummary(result);
+      }
     } catch (err) {
       alert(err.message);
       btn.disabled = false;
@@ -1131,47 +1201,63 @@ function hideLoading() {
 
   clearBtn.addEventListener('click', clearHistory);
 
+  function handleDashChatDone(data, loading) {
+    loading.classList.remove('sm-streaming');
+    if (!loading.textContent.trim()) loading.textContent = data.reply || 'Done.';
+    const summaryParts = [];
+    if (data.applied && data.applied.length) summaryParts.push('Modified: ' + data.applied.join(', '));
+    if (data.actionResults && data.actionResults.length) {
+      for (const a of data.actionResults) summaryParts.push(`${a.action}: ${a.slug || a.name}`);
+    }
+    if (summaryParts.length) {
+      const details = document.createElement('div');
+      details.className = 'dash-chat-actions-list';
+      details.innerHTML = '<ul>' + summaryParts.map(s => `<li>${esc(s)}</li>`).join('') + '</ul>';
+      loading.appendChild(details);
+    }
+    if (data.actionResults && data.actionResults.length) load();
+  }
+
   async function send() {
     const message = input.value.trim();
     if (!message) return;
     input.value = '';
     sendBtn.disabled = true;
     addMsg('user', message);
-    const loading = addMsg('ai', '...');
+    const loading = addMsg('ai', '');
+    loading.classList.add('sm-streaming');
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      const data = await res.json();
-      loading.textContent = data.reply || 'Done.';
-
-      const summaryParts = [];
-      if (data.applied && data.applied.length) {
-        summaryParts.push('Modified: ' + data.applied.join(', '));
+    const stream = window.__SM_UI__?.streamAI;
+    if (stream) {
+      try {
+        await stream('/api/chat', { message }, {
+          onToken(text) { loading.textContent += text; msgContainer.scrollTop = msgContainer.scrollHeight; },
+          onDone(data) { handleDashChatDone(data, loading); },
+          onError(err) { loading.classList.remove('sm-streaming'); loading.textContent = 'Error: ' + err; },
+        });
+      } catch (err) {
+        loading.classList.remove('sm-streaming');
+        loading.textContent = 'Error: ' + err.message;
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
       }
-      if (data.actionResults && data.actionResults.length) {
-        for (const a of data.actionResults) {
-          summaryParts.push(`${a.action}: ${a.slug}`);
-        }
+    } else {
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+        });
+        const data = await res.json();
+        loading.textContent = data.reply || 'Done.';
+        handleDashChatDone(data, loading);
+      } catch (err) {
+        loading.textContent = 'Error: ' + err.message;
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
       }
-      if (summaryParts.length) {
-        const details = document.createElement('div');
-        details.className = 'dash-chat-actions-list';
-        details.innerHTML = '<ul>' + summaryParts.map(s => `<li>${esc(s)}</li>`).join('') + '</ul>';
-        loading.appendChild(details);
-      }
-
-      if (data.actionResults && data.actionResults.length) {
-        await load();
-      }
-    } catch (err) {
-      loading.textContent = 'Error: ' + err.message;
-    } finally {
-      sendBtn.disabled = false;
-      input.focus();
     }
   }
 
@@ -1243,6 +1329,40 @@ function renderSettings() {
     </div>`;
   }
 
+  const seo = state.site.seo || {};
+  const schema = seo.schemaOrg || {};
+  h += `<div class="settings-panel">
+    <h2>SEO Defaults</h2>
+    <form id="seo-site-form">
+      <div class="form-group"><label>Title Suffix</label>
+        <input name="titleSuffix" value="${esc(seo.titleSuffix || '')}" placeholder=" | My Website">
+        <small class="form-hint">Appended to every page title, e.g. "About | My Website"</small></div>
+      <div class="form-group"><label>Default Meta Description</label>
+        <textarea name="defaultDescription" rows="2" placeholder="Fallback description for pages without one">${esc(seo.defaultDescription || '')}</textarea></div>
+      <div class="form-group"><label>Default OG Image</label>
+        <input name="ogImage" value="${esc(seo.ogImage || '')}" placeholder="/media/uploads/og-default.jpg">
+        <small class="form-hint">Full path to default social sharing image</small></div>
+      <div class="form-group"><label>Site URL</label>
+        <input name="url" value="${esc(seo.url || '')}" placeholder="https://example.com">
+        <small class="form-hint">Used for canonical URLs and OG tags in export</small></div>
+      <div class="form-group"><label>Locale</label>
+        <input name="locale" value="${esc(seo.locale || 'en_US')}" placeholder="en_US"></div>
+      <div class="form-group"><label>Twitter Handle</label>
+        <input name="twitterHandle" value="${esc(seo.twitterHandle || '')}" placeholder="@handle"></div>
+      <div class="form-group"><label>Schema.org Type</label>
+        <select name="schemaType">
+          <option value="Organization" ${schema.type === 'Organization' || !schema.type ? 'selected' : ''}>Organization</option>
+          <option value="Person" ${schema.type === 'Person' ? 'selected' : ''}>Person</option>
+          <option value="LocalBusiness" ${schema.type === 'LocalBusiness' ? 'selected' : ''}>Local Business</option>
+        </select></div>
+      <div class="form-group"><label>Schema.org Name</label>
+        <input name="schemaName" value="${esc(schema.name || '')}" placeholder="Your organization name"></div>
+      <div class="form-group"><label>Schema.org Logo URL</label>
+        <input name="schemaLogo" value="${esc(schema.logo || '')}" placeholder="/media/uploads/logo.png"></div>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">Save SEO Settings</button></div>
+    </form>
+  </div>`;
+
   h += '</div>';
   return h;
 }
@@ -1282,6 +1402,33 @@ function initSettings() {
         if (!res.ok) { alert(data.error || 'Failed'); return; }
         pwForm.reset();
         showToast('Password changed');
+      } catch (err) { alert(err.message); }
+    };
+  }
+
+  const seoForm = document.getElementById('seo-site-form');
+  if (seoForm) {
+    seoForm.onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target;
+      const seo = {
+        titleSuffix: f.titleSuffix.value,
+        defaultDescription: f.defaultDescription.value,
+        ogImage: f.ogImage.value,
+        url: f.url.value,
+        locale: f.locale.value,
+        twitterHandle: f.twitterHandle.value,
+        schemaOrg: {
+          type: f.schemaType.value,
+          name: f.schemaName.value,
+          logo: f.schemaLogo.value,
+          url: f.url.value,
+        },
+      };
+      try {
+        await api('PUT', '/site', { ...state.site, seo });
+        state.site.seo = seo;
+        showToast('SEO settings saved');
       } catch (err) { alert(err.message); }
     };
   }

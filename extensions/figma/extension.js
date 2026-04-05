@@ -69,6 +69,11 @@ export const routes = [
 
       if (params.path === 'apply') {
         const cookie = req?.headers?.cookie || '';
+        const wantStream = (req?.headers?.accept || '').includes('text/event-stream');
+        if (wantStream) {
+          await handleApplyStream(body, cookie, res);
+          return;
+        }
         return handleApply(body, cookie);
       }
 
@@ -191,6 +196,52 @@ async function handleExtract({ figmaUrl }, cookie) {
     status: 200,
     body: { tokens, structure, decisions, structureDescription, imageMap },
   };
+}
+
+async function handleApplyStream(body, cookie, res) {
+  const base = `http://localhost:${process.env.PORT || 3000}`;
+  const authHeaders = cookie ? { Cookie: cookie } : {};
+  const { tokens, structure, decisions, page, mode, newPage, imageMap } = body;
+
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+
+  try {
+    let targetUrl, payload;
+
+    if (mode === 'create' && newPage) {
+      const intent = buildFigmaPrompt(tokens, structure, decisions, mode, newPage.intent, imageMap);
+      targetUrl = `${base}/api/generate`;
+      payload = { title: newPage.title, slug: newPage.slug, intent };
+    } else {
+      const figmaContext = buildFigmaPrompt(tokens, structure, decisions, mode, null, imageMap);
+      let pageHTML = null;
+      if (page) {
+        try {
+          const pageRes = await fetch(`${base}/api/pages/${page}/html`, { headers: authHeaders });
+          if (pageRes.ok) pageHTML = await pageRes.text();
+        } catch {}
+      }
+      targetUrl = `${base}/api/chat`;
+      payload = { message: figmaContext, slug: page || null, html: pageHTML };
+    }
+
+    const upstreamRes = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', ...authHeaders },
+      body: JSON.stringify(payload),
+    });
+
+    const reader = upstreamRes.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(decoder.decode(value, { stream: true }));
+    }
+  } catch (err) {
+    res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
+  }
+  res.end();
 }
 
 async function handleApply({ tokens, structure, decisions, page, mode, newPage, imageMap }, cookie) {
