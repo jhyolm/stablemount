@@ -1,6 +1,8 @@
 # Stablemount
 
-Open-source, AI-first website builder. No visual builder, no block editor, no template engine. AI generates complete pages from plain language. You edit content directly on the rendered page with `contenteditable`. Everything on disk is flat files — HTML, CSS, JSON. One dependency.
+Open-source website builder with AI built in. Not a coding tool — the AI lives inside the product. Anyone on your team opens the dashboard, describes a page in plain language, and the system builds it within the site's existing design system. Then you edit your own words directly on the rendered page.
+
+This is not vibe coding. Vibe coding is a developer prompting an external AI to generate code they then have to evaluate and maintain. Stablemount is a managed environment where AI-generated output is automatically constrained by design tokens, instruction rules, and a growing component library. Every page the AI builds makes the next one more consistent. The architecture exists to capture, standardize, and accumulate the decisions that would otherwise be throwaway context in a chat window.
 
 ## How to use Stablemount
 
@@ -84,12 +86,13 @@ This is a fundamentally different editing model from WordPress, Webflow, Squares
 - No proprietary format. Your site is HTML, CSS, and JSON. Take it anywhere.
 - Self-hostable. Bring your own AI key, run on your own machine.
 
-### vs. AI generators (v0, Bolt, Lovable)
+### vs. AI generators (v0, Bolt, Lovable) and vibe coding
 
-- Not a one-shot generator. Stablemount is a persistent editing environment.
-- Content is editable inline after generation. You refine through conversation and direct editing.
-- Design consistency enforced through tokens and instructions, not luck.
-- Components, collections, versioning, media management, multi-user auth — it's a full platform, not a code export.
+- Not a one-shot generator. Stablemount is a persistent environment where the design system accumulates across every generation.
+- The AI is built into the product. You don't connect an external coding tool — you talk to the AI inside the dashboard and on the page itself. A marketer uses it the same way a developer does.
+- Content is editable inline after generation. You edit your words directly, not by re-prompting.
+- Design consistency enforced through tokens, instructions, and reusable components — not luck. The 10th page is far more consistent than the 1st because the system learned from the first 9.
+- Components, collections, versioning, media management, SEO, multi-user auth — it's a full platform, not a code export.
 
 ## Architecture
 
